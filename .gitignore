@@ -1,0 +1,7 @@
+# Local browser/system noise
+Thumbs.db
+Desktop.ini
+
+# Python cache/output not part of the prototype
+__pycache__/
+*.pyc

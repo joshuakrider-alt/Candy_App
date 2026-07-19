@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Candy Lady | Seller Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Nunito:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <div class="page-shell" data-seller-app>
+      <nav class="topbar app-topbar">
+        <a class="brand-pill" href="index.html">The Candy Lady</a>
+        <div class="topbar-links">
+          <a href="buyer.html">Buyer demo</a>
+          <a class="active-link" href="seller.html">Seller demo</a>
+          <a href="admin.html">Admin demo</a>
+        </div>
+      </nav>
+
+      <main class="app-layout">
+        <section class="app-hero reveal">
+          <div>
+            <p class="eyebrow">Seller dashboard</p>
+            <h1 class="app-title">Run your snack spot with a few taps.</h1>
+            <p class="hero-text">
+              Approved sellers pick from the platform catalog, toggle stock, and
+              manage pickup orders without needing a complicated system.
+            </p>
+          </div>
+          <div class="stats-row">
+            <div class="stat-chip"><strong data-seller-order-count>3</strong><span>Active orders</span></div>
+            <div class="stat-chip"><strong data-in-stock-count>2</strong><span>Items in stock</span></div>
+            <div class="stat-chip"><strong>4.9</strong><span>Seller rating</span></div>
+          </div>
+        </section>
+
+        <section class="app-grid reveal">
+          <div class="app-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Today's orders</p>
+              <h2>Pickup queue</h2>
+            </div>
+            <div class="order-list">
+              <article class="order-row" data-order-row data-order-id="1082">
+                <div>
+                  <strong>Order #1082</strong>
+                  <p>2 gummy mixes, 1 orange soda</p>
+                </div>
+                <div class="row-actions">
+                  <span class="status-pill ready" data-order-status>Ready</span>
+                  <button class="mini-action" type="button" data-next-order-status>Complete</button>
+                </div>
+              </article>
+              <article class="order-row" data-order-row data-order-id="1084">
+                <div>
+                  <strong>Order #1084</strong>
+                  <p>1 hot chips, 1 fruit punch</p>
+                </div>
+                <div class="row-actions">
+                  <span class="status-pill prepping" data-order-status>Packing</span>
+                  <button class="mini-action" type="button" data-next-order-status>Mark ready</button>
+                </div>
+              </article>
+              <article class="order-row" data-order-row data-order-id="1088">
+                <div>
+                  <strong>Order #1088</strong>
+                  <p>3 candy bars, 2 sodas</p>
+                </div>
+                <div class="row-actions">
+                  <span class="status-pill waiting" data-order-status>New</span>
+                  <button class="mini-action" type="button" data-next-order-status>Start packing</button>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <aside class="app-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Shop profile</p>
+              <h2>Ms. Kiki's Snack Spot</h2>
+            </div>
+            <div class="profile-stack">
+              <div><span>Neighborhood</span><strong>Cherry Hill</strong></div>
+              <div><span>Hours</span><strong>2:30 PM - 7:00 PM</strong></div>
+              <div><span>Pickup note</span><strong>Use side porch bell</strong></div>
+              <div><span>Payment</span><strong>Cash, Cash App, card reader</strong></div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="app-section reveal">
+          <div class="section-heading">
+            <p class="eyebrow">Inventory controls</p>
+            <h2>Approved catalog items</h2>
+          </div>
+          <div class="inventory-grid">
+            <article class="inventory-card strawberry" data-inventory-card data-stock-id="sour-gummy-mix" data-stock-status="in">
+              <div>
+                <p class="card-label">Candy</p>
+                <h3>Sour gummy mix</h3>
+              </div>
+              <div class="inventory-meta">
+                <span>$2.50</span>
+                <strong data-stock-label>In stock</strong>
+                <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+              </div>
+            </article>
+            <article class="inventory-card citrus" data-inventory-card data-stock-id="orange-soda-bottle" data-stock-status="low">
+              <div>
+                <p class="card-label">Drinks</p>
+                <h3>Orange soda bottle</h3>
+              </div>
+              <div class="inventory-meta">
+                <span>$1.75</span>
+                <strong data-stock-label>Low stock</strong>
+                <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+              </div>
+            </article>
+            <article class="inventory-card aqua" data-inventory-card data-stock-id="hot-chips" data-stock-status="in">
+              <div>
+                <p class="card-label">Snacks</p>
+                <h3>Hot chips</h3>
+              </div>
+              <div class="inventory-meta">
+                <span>$1.50</span>
+                <strong data-stock-label>In stock</strong>
+                <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
