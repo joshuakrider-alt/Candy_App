@@ -38,6 +38,10 @@ a {
   text-decoration: none;
 }
 
+button {
+  font-family: inherit;
+}
+
 .page-shell {
   width: min(1200px, calc(100% - 32px));
   margin: 0 auto;
@@ -520,6 +524,17 @@ h3 {
 .topbar-links a:hover,
 .topbar-links .active-link {
   opacity: 1;
+}
+
+.nav-action {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(68, 37, 29, 0.09);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 900;
 }
 
 .cta-actions {

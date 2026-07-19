@@ -29,7 +29,23 @@ const storage = {
   set(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   },
+  remove(key) {
+    localStorage.removeItem(key);
+  },
 };
+
+document.querySelectorAll("[data-reset-demo]").forEach((button) => {
+  button.addEventListener("click", () => {
+    [
+      "candyLadyCart",
+      "candyLadySellerState",
+      "candyLadyAdminState",
+      "candyLadyLastPickupCode",
+    ].forEach((key) => storage.remove(key));
+
+    window.location.reload();
+  });
+});
 
 const buyerApp = document.querySelector("[data-buyer-app]");
 
@@ -40,6 +56,7 @@ if (buyerApp) {
   const emptyState = document.querySelector("[data-empty-state]");
   const cartLines = document.querySelector("[data-cart-lines]");
   const cartTotal = document.querySelector("[data-cart-total]");
+  const pickupCode = document.querySelector("[data-pickup-code]");
   const orderMessage = document.querySelector("[data-order-message]");
   const placeOrderButton = document.querySelector("[data-place-order]");
   const cart = new Map(
@@ -84,6 +101,11 @@ if (buyerApp) {
         `
       )
       .join("");
+  };
+
+  const renderPickupCode = () => {
+    const savedCode = storage.get("candyLadyLastPickupCode", null);
+    pickupCode.textContent = savedCode || "Not placed yet";
   };
 
   const filterProducts = () => {
@@ -166,13 +188,18 @@ if (buyerApp) {
       return;
     }
 
-    orderMessage.textContent = "Pickup order placed for demo purposes.";
+    const code = `CL-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    storage.set("candyLadyLastPickupCode", code);
+    pickupCode.textContent = code;
+    orderMessage.textContent = `Pickup order placed. Show code ${code} at pickup.`;
     cart.clear();
     renderCart();
   });
 
   filterProducts();
   renderCart();
+  renderPickupCode();
 }
 
 const sellerApp = document.querySelector("[data-seller-app]");
