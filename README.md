@@ -1,6 +1,6 @@
 # The Candy Lady
 
-A clickable prototype for a neighborhood snack marketplace where approved sellers can offer approved candy, chips, and drinks for local pickup.
+A clickable candy reseller platform prototype for a neighborhood snack marketplace where approved sellers can offer approved candy, chips, and drinks for local pickup.
 
 ## Prototype Pages
 
