@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Candy Lady | Seller Application</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Nunito:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <div class="page-shell" data-application-app>
+      <nav class="topbar app-topbar">
+        <a class="brand-pill" href="index.html">The Candy Lady</a>
+        <div class="topbar-links">
+          <a href="buyer.html">Buyer demo</a>
+          <a href="seller.html">Seller demo</a>
+          <a href="admin.html">Admin demo</a>
+          <a class="active-link" href="apply.html">Apply</a>
+          <button class="nav-action" type="button" data-reset-demo>Reset demo</button>
+        </div>
+      </nav>
+
+      <main class="app-layout">
+        <section class="app-hero reveal">
+          <div>
+            <p class="eyebrow">Seller application</p>
+            <h1 class="app-title">Apply to run a neighborhood snack spot.</h1>
+            <p class="hero-text">
+              This demo form collects the basics we would need before approving
+              a seller: neighborhood, pickup window, product categories, and
+              contact details.
+            </p>
+          </div>
+          <div class="stats-row">
+            <div class="stat-chip"><strong>4</strong><span>Application steps</span></div>
+            <div class="stat-chip"><strong>3</strong><span>Snack categories</span></div>
+            <div class="stat-chip"><strong>1</strong><span>Review queue</span></div>
+          </div>
+        </section>
+
+        <section class="app-grid reveal">
+          <form class="app-panel application-form" data-application-form>
+            <div class="section-heading">
+              <p class="eyebrow">Application details</p>
+              <h2>Seller profile</h2>
+            </div>
+
+            <label class="form-field">
+              <span>Shop name</span>
+              <input name="shopName" required placeholder="Ms. Kiki's Snack Spot" />
+            </label>
+
+            <label class="form-field">
+              <span>Contact name</span>
+              <input name="contactName" required placeholder="Kiana Roberts" />
+            </label>
+
+            <label class="form-field">
+              <span>Neighborhood</span>
+              <input name="neighborhood" required placeholder="Cherry Hill" />
+            </label>
+
+            <label class="form-field">
+              <span>Pickup window</span>
+              <input name="pickupWindow" required placeholder="Weekdays, 2:30 PM - 7:00 PM" />
+            </label>
+
+            <fieldset class="form-field checkbox-group">
+              <legend>Approved categories requested</legend>
+              <label><input type="checkbox" name="categories" value="Candy" /> Candy</label>
+              <label><input type="checkbox" name="categories" value="Chips" /> Chips</label>
+              <label><input type="checkbox" name="categories" value="Drinks" /> Drinks</label>
+            </fieldset>
+
+            <label class="form-field">
+              <span>Pickup notes</span>
+              <textarea
+                name="pickupNotes"
+                rows="4"
+                placeholder="Example: pickup from front porch window, adult must be present."
+              ></textarea>
+            </label>
+
+            <button class="primary-button" type="submit">Submit application</button>
+            <p class="order-message" data-application-message role="status"></p>
+          </form>
+
+          <aside class="app-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Demo result</p>
+              <h2>Saved application</h2>
+            </div>
+            <div class="profile-stack" data-application-preview>
+              <div><span>Status</span><strong>No application yet</strong></div>
+              <div><span>Next step</span><strong>Submit the form</strong></div>
+            </div>
+            <a class="secondary-button" href="admin.html">Open admin review</a>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

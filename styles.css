@@ -614,6 +614,50 @@ h3 {
   font-weight: 800;
 }
 
+.application-form,
+.form-field {
+  display: grid;
+  gap: 12px;
+}
+
+.form-field {
+  font-weight: 900;
+}
+
+.form-field input,
+.form-field textarea {
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid rgba(68, 37, 29, 0.16);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+}
+
+.form-field textarea {
+  resize: vertical;
+}
+
+.checkbox-group {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid rgba(68, 37, 29, 0.16);
+  border-radius: 8px;
+}
+
+.checkbox-group legend {
+  padding: 0 6px;
+}
+
+.checkbox-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 14px;
+}
+
 .filter-controls {
   display: flex;
   flex-wrap: wrap;

@@ -41,6 +41,7 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
       "candyLadySellerState",
       "candyLadyAdminState",
       "candyLadyLastPickupCode",
+      "candyLadyApplications",
     ].forEach((key) => storage.remove(key));
 
     window.location.reload();
@@ -48,6 +49,53 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
 });
 
 const buyerApp = document.querySelector("[data-buyer-app]");
+
+const applicationApp = document.querySelector("[data-application-app]");
+
+if (applicationApp) {
+  const form = document.querySelector("[data-application-form]");
+  const message = document.querySelector("[data-application-message]");
+  const preview = document.querySelector("[data-application-preview]");
+
+  const renderApplicationPreview = () => {
+    const applications = storage.get("candyLadyApplications", []);
+    const latest = applications.at(-1);
+
+    if (!latest) return;
+
+    preview.innerHTML = `
+      <div><span>Status</span><strong>Pending review</strong></div>
+      <div><span>Shop</span><strong>${latest.shopName}</strong></div>
+      <div><span>Neighborhood</span><strong>${latest.neighborhood}</strong></div>
+      <div><span>Categories</span><strong>${latest.categories.join(", ") || "None selected"}</strong></div>
+    `;
+  };
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+
+    const formData = new FormData(form);
+    const applications = storage.get("candyLadyApplications", []);
+    const application = {
+      id: `app-${Date.now()}`,
+      shopName: formData.get("shopName").trim(),
+      contactName: formData.get("contactName").trim(),
+      neighborhood: formData.get("neighborhood").trim(),
+      pickupWindow: formData.get("pickupWindow").trim(),
+      pickupNotes: formData.get("pickupNotes").trim(),
+      categories: formData.getAll("categories"),
+      status: "pending",
+      submittedAt: new Date().toISOString(),
+    };
+
+    storage.set("candyLadyApplications", [...applications, application]);
+    message.textContent = "Application saved for demo review.";
+    form.reset();
+    renderApplicationPreview();
+  });
+
+  renderApplicationPreview();
+}
 
 if (buyerApp) {
   const searchInput = document.querySelector("[data-search-input]");
@@ -338,6 +386,9 @@ const adminApp = document.querySelector("[data-admin-app]");
 if (adminApp) {
   const activeSellerCount = document.querySelector("[data-active-seller-count]");
   const pendingReviewCount = document.querySelector("[data-pending-review-count]");
+  const submittedApplicationList = document.querySelector(
+    "[data-submitted-application-list]"
+  );
   const savedAdminState = storage.get("candyLadyAdminState", {
     activeSellers: Number(activeSellerCount.textContent),
     approvals: {},
@@ -398,20 +449,102 @@ if (adminApp) {
   };
 
   const updateAdminStats = () => {
+    const applications = storage.get("candyLadyApplications", []);
     const pendingRows = [
       ...document.querySelectorAll("[data-approval-row]"),
     ].filter((row) => {
       return !["approved", "rejected"].includes(row.dataset.approvalStatus);
     });
+    const pendingApplications = applications.filter((application) => {
+      return !["approved", "rejected"].includes(application.status);
+    });
 
-    pendingReviewCount.textContent = pendingRows.length;
+    pendingReviewCount.textContent = pendingRows.length + pendingApplications.length;
+  };
+
+  const saveApplications = (applications) => {
+    storage.set("candyLadyApplications", applications);
+  };
+
+  const renderSubmittedApplications = () => {
+    const applications = storage.get("candyLadyApplications", []);
+
+    if (!applications.length) {
+      submittedApplicationList.innerHTML =
+        '<p class="empty-state">No submitted applications yet.</p>';
+      return;
+    }
+
+    submittedApplicationList.innerHTML = applications
+      .map((application) => {
+        const statusClass = approvalClasses[application.status] || "waiting";
+        const statusLabel = approvalLabels[application.status] || "Pending";
+        const disabled = ["approved", "rejected"].includes(application.status)
+          ? "disabled"
+          : "";
+        const disabledClass = disabled ? " disabled-action" : "";
+
+        return `
+          <article class="approval-row" data-submitted-application-id="${application.id}">
+            <div>
+              <strong>${application.shopName}</strong>
+              <p>${application.neighborhood} | ${application.pickupWindow}</p>
+              <p>Requested categories: ${application.categories.join(", ") || "None selected"}</p>
+              <p>Contact: ${application.contactName}</p>
+            </div>
+            <div class="approval-actions">
+              <span class="status-pill ${statusClass}">${statusLabel}</span>
+              <button class="mini-action${disabledClass}" type="button" data-approve-application ${disabled}>Approve</button>
+              <button class="soft-action${disabledClass}" type="button" data-reject-application ${disabled}>Reject</button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
   };
 
   document.addEventListener("click", (event) => {
     const approveButton = event.target.closest("[data-approve-seller]");
     const rejectButton = event.target.closest("[data-reject-seller]");
+    const approveApplicationButton = event.target.closest(
+      "[data-approve-application]"
+    );
+    const rejectApplicationButton = event.target.closest(
+      "[data-reject-application]"
+    );
 
-    if (!approveButton && !rejectButton) return;
+    if (
+      !approveButton &&
+      !rejectButton &&
+      !approveApplicationButton &&
+      !rejectApplicationButton
+    ) {
+      return;
+    }
+
+    if (approveApplicationButton || rejectApplicationButton) {
+      const row = event.target.closest("[data-submitted-application-id]");
+      const applicationId = row.dataset.submittedApplicationId;
+      const applications = storage.get("candyLadyApplications", []);
+      const updatedApplications = applications.map((application) => {
+        if (application.id !== applicationId) return application;
+
+        return {
+          ...application,
+          status: approveApplicationButton ? "approved" : "rejected",
+        };
+      });
+
+      if (approveApplicationButton) {
+        activeSellerCount.textContent = String(Number(activeSellerCount.textContent) + 1);
+      }
+
+      saveApplications(updatedApplications);
+      renderSubmittedApplications();
+      updateAdminStats();
+      saveAdminState();
+      return;
+    }
 
     const row = event.target.closest("[data-approval-row]");
 
@@ -429,5 +562,6 @@ if (adminApp) {
   });
 
   applySavedAdminState();
+  renderSubmittedApplications();
   updateAdminStats();
 }
