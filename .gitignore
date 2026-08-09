@@ -5,3 +5,6 @@ Desktop.ini
 # Python cache/output not part of the prototype
 __pycache__/
 *.pyc
+
+# Node package installs are generated locally
+node_modules/

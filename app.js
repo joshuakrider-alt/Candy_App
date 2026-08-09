@@ -34,6 +34,30 @@ const storage = {
   },
 };
 
+const appData = window.CANDY_LADY_DATA || { products: [], sellers: [], source: null };
+const sellersById = new Map(appData.sellers.map((seller) => [seller.id, seller]));
+
+const money = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
+const escapeHTML = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+const getSeller = (product) => sellersById.get(product.sellerId) || appData.sellers[0];
+
+const renderSourceNote = (target) => {
+  if (!target || !appData.source) return;
+
+  target.innerHTML = `Product data seeded from <a href="${appData.source.url}" target="_blank" rel="noreferrer">${appData.source.name}</a>, pulled ${appData.source.pulledAt}. Prices, seller assignment, and stock are demo marketplace values.`;
+};
+
 document.querySelectorAll("[data-reset-demo]").forEach((button) => {
   button.addEventListener("click", () => {
     [
@@ -100,7 +124,9 @@ if (applicationApp) {
 if (buyerApp) {
   const searchInput = document.querySelector("[data-search-input]");
   const filterButtons = [...document.querySelectorAll("[data-filter]")];
-  const productCards = [...document.querySelectorAll("[data-product-card]")];
+  const productList = document.querySelector("[data-product-list]");
+  const sellerCardGrid = document.querySelector(".seller-card-grid");
+  const sourceNote = document.querySelector("[data-data-source]");
   const emptyState = document.querySelector("[data-empty-state]");
   const cartLines = document.querySelector("[data-cart-lines]");
   const cartTotal = document.querySelector("[data-cart-total]");
@@ -108,17 +134,97 @@ if (buyerApp) {
   const orderMessage = document.querySelector("[data-order-message]");
   const placeOrderButton = document.querySelector("[data-place-order]");
   const cart = new Map(
-    storage.get("candyLadyCart", []).map((item) => [item.name, item])
+    storage.get("candyLadyCart", []).map((item) => [item.id || item.name, item])
   );
   let activeFilter = "all";
 
-  const money = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
+  const renderSellers = () => {
+    if (!sellerCardGrid || !appData.sellers.length) return;
+
+    sellerCardGrid.innerHTML = appData.sellers
+      .map((seller, index) => {
+        const sellerProducts = appData.products
+          .filter((product) => product.sellerId === seller.id)
+          .slice(0, 3);
+
+        return `
+          <article class="seller-card ${index === 0 ? "feature-card" : ""}">
+            <div class="seller-card-top">
+              <div>
+                <p class="card-label">${seller.open ? "Open now" : "Closed now"}</p>
+                <h3>${escapeHTML(seller.name)}</h3>
+              </div>
+              <span class="pill-price">${seller.rating}</span>
+            </div>
+            <p>${escapeHTML(seller.neighborhood)} | ${escapeHTML(seller.pickupTime)}</p>
+            <div class="badge-row">
+              ${seller.tags.map((tag) => `<span>${escapeHTML(tag)}</span>`).join("")}
+            </div>
+            <div class="quick-items">
+              ${sellerProducts
+                .map(
+                  (product) =>
+                    `<div><strong>${escapeHTML(product.name)}</strong><span>${money.format(product.price)}</span></div>`
+                )
+                .join("")}
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  };
+
+  const renderProducts = () => {
+    if (!productList || !appData.products.length) return;
+
+    productList.innerHTML = appData.products
+      .map((product) => {
+        const seller = getSeller(product);
+        const open = product.open ?? seller?.open ?? false;
+
+        return `
+          <article
+            class="catalog-row ${product.style}"
+            data-product-card
+            data-product-id="${product.id}"
+            data-category="${product.category}"
+            data-open="${open}"
+            data-name="${escapeHTML(`${product.name} ${product.brand} ${seller?.name || ""}`)}"
+            data-price="${product.price}"
+          >
+            <img class="product-thumb" src="${product.image}" alt="${escapeHTML(product.name)} package" loading="lazy" />
+            <div class="catalog-copy">
+              <p class="card-label">${escapeHTML(product.brand)} | ${escapeHTML(product.categoryLabel)}</p>
+              <h3>${escapeHTML(product.name)}</h3>
+              <p>${escapeHTML(seller?.name)} | ${escapeHTML(product.servingSize)}</p>
+              <div class="product-facts">
+                <span>${escapeHTML(product.calories)}</span>
+                <span>${escapeHTML(product.sugars)}</span>
+                <span>Nutri-Score ${escapeHTML(product.nutriScore)}</span>
+                <a href="${product.sourceUrl}" target="_blank" rel="noreferrer">OFF #${escapeHTML(product.barcode)}</a>
+              </div>
+            </div>
+            <div class="catalog-actions">
+              <strong>${money.format(product.price)}</strong>
+              <button class="mini-action" type="button" data-add-to-cart>Add</button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  };
+
+  renderSellers();
+  renderProducts();
+  renderSourceNote(sourceNote);
+
+  const productCards = [...document.querySelectorAll("[data-product-card]")];
 
   const renderCart = () => {
-    const items = [...cart.values()];
+    const items = [...cart.values()].map((item) => ({
+      ...item,
+      id: item.id || item.name,
+    }));
     const total = items.reduce((sum, item) => sum + item.price * item.qty, 0);
 
     storage.set("candyLadyCart", items);
@@ -132,17 +238,17 @@ if (buyerApp) {
     cartLines.innerHTML = items
       .map(
         (item) => `
-          <article class="cart-item" data-cart-item="${item.name}">
+          <article class="cart-item" data-cart-item="${item.id}">
             <div class="cart-item-main">
-              <strong>${item.name}</strong>
+              <strong>${escapeHTML(item.name)}</strong>
               <span>${money.format(item.price * item.qty)}</span>
             </div>
             <div class="cart-item-controls">
               <span>${money.format(item.price)} each</span>
-              <div class="qty-controls" aria-label="${item.name} quantity">
-                <button class="qty-button" type="button" data-cart-minus="${item.name}">-</button>
+              <div class="qty-controls" aria-label="${escapeHTML(item.name)} quantity">
+                <button class="qty-button" type="button" data-cart-minus="${item.id}">-</button>
                 <strong>${item.qty}</strong>
-                <button class="qty-button" type="button" data-cart-plus="${item.name}">+</button>
+                <button class="qty-button" type="button" data-cart-plus="${item.id}">+</button>
               </div>
             </div>
           </article>
@@ -196,34 +302,39 @@ if (buyerApp) {
 
     if (addButton) {
       const card = addButton.closest("[data-product-card]");
-      const name = card.dataset.name;
-      const price = Number(card.dataset.price);
-      const existing = cart.get(name);
+      const product =
+        appData.products.find((item) => item.id === card.dataset.productId) || {
+          id: card.dataset.name,
+          name: card.dataset.name,
+          price: Number(card.dataset.price),
+        };
+      const existing = cart.get(product.id);
 
-      cart.set(name, {
-        name,
-        price,
+      cart.set(product.id, {
+        id: product.id,
+        name: product.name,
+        price: product.price,
         qty: existing ? existing.qty + 1 : 1,
       });
-      orderMessage.textContent = `${name} added to pickup order.`;
+      orderMessage.textContent = `${product.name} added to pickup order.`;
       renderCart();
     }
 
     if (plusButton) {
-      const name = plusButton.dataset.cartPlus;
-      const item = cart.get(name);
-      cart.set(name, { ...item, qty: item.qty + 1 });
+      const id = plusButton.dataset.cartPlus;
+      const item = cart.get(id);
+      cart.set(id, { ...item, qty: item.qty + 1 });
       renderCart();
     }
 
     if (minusButton) {
-      const name = minusButton.dataset.cartMinus;
-      const item = cart.get(name);
+      const id = minusButton.dataset.cartMinus;
+      const item = cart.get(id);
 
       if (item.qty === 1) {
-        cart.delete(name);
+        cart.delete(id);
       } else {
-        cart.set(name, { ...item, qty: item.qty - 1 });
+        cart.set(id, { ...item, qty: item.qty - 1 });
       }
 
       renderCart();
@@ -253,13 +364,76 @@ if (buyerApp) {
 const sellerApp = document.querySelector("[data-seller-app]");
 
 if (sellerApp) {
-  const stockCards = [...document.querySelectorAll("[data-inventory-card]")];
+  const inventoryGrid = document.querySelector(".inventory-grid");
+  const orderList = document.querySelector(".order-list");
+  const profileTitle = document.querySelector(".profile-stack")?.previousElementSibling?.querySelector("h2");
+  const profileStack = document.querySelector(".profile-stack");
   const inStockCount = document.querySelector("[data-in-stock-count]");
   const activeOrderCount = document.querySelector("[data-seller-order-count]");
   const savedSellerState = storage.get("candyLadySellerState", {
     stock: {},
     orders: {},
   });
+  const primarySeller = appData.sellers[0];
+  const sellerProducts = appData.products.filter(
+    (product) => product.sellerId === primarySeller?.id
+  );
+
+  if (profileTitle && primarySeller) profileTitle.textContent = primarySeller.name;
+  if (profileStack && primarySeller) {
+    profileStack.innerHTML = `
+      <div><span>Neighborhood</span><strong>${escapeHTML(primarySeller.neighborhood)}</strong></div>
+      <div><span>Hours</span><strong>2:30 PM - 7:00 PM</strong></div>
+      <div><span>Pickup note</span><strong>Use side porch bell</strong></div>
+      <div><span>Payment</span><strong>Cash, Cash App, card reader</strong></div>
+      <div><span>Data source</span><strong>${escapeHTML(appData.source?.name || "Demo catalog")}</strong></div>
+    `;
+  }
+
+  if (inventoryGrid && sellerProducts.length) {
+    inventoryGrid.innerHTML = sellerProducts
+      .map(
+        (product) => `
+          <article class="inventory-card ${product.style}" data-inventory-card data-stock-id="${product.id}" data-stock-status="${product.stock}">
+            <img class="product-thumb" src="${product.image}" alt="${escapeHTML(product.name)} package" loading="lazy" />
+            <div>
+              <p class="card-label">${escapeHTML(product.brand)} | ${escapeHTML(product.categoryLabel)}</p>
+              <h3>${escapeHTML(product.name)}</h3>
+              <p>${escapeHTML(product.calories)} | ${escapeHTML(product.sugars)} | OFF #${escapeHTML(product.barcode)}</p>
+            </div>
+            <div class="inventory-meta">
+              <span>${money.format(product.price)}</span>
+              <strong data-stock-label>${product.stock === "low" ? "Low stock" : "In stock"}</strong>
+              <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+            </div>
+          </article>
+        `
+      )
+      .join("");
+  }
+
+  if (orderList && sellerProducts.length) {
+    orderList.innerHTML = [
+      ["1082", "ready", `2 ${sellerProducts[0].name}, 1 ${sellerProducts[1]?.name || "drink"}`],
+      ["1084", "packing", `1 ${sellerProducts[2]?.name || sellerProducts[0].name}`],
+      ["1088", "new", `3 ${sellerProducts[3]?.name || sellerProducts[0].name}`],
+    ]
+      .map(([id, status, text]) => `
+        <article class="order-row" data-order-row data-order-id="${id}">
+          <div>
+            <strong>Order #${id}</strong>
+            <p>${escapeHTML(text)}</p>
+          </div>
+          <div class="row-actions">
+            <span class="status-pill" data-order-status>${status}</span>
+            <button class="mini-action" type="button" data-next-order-status></button>
+          </div>
+        </article>
+      `)
+      .join("");
+  }
+
+  const stockCards = [...document.querySelectorAll("[data-inventory-card]")];
 
   const stockLabels = {
     in: "In stock",
@@ -326,6 +500,11 @@ if (sellerApp) {
 
       if (savedStatus) {
         setOrderStatus(row, savedStatus);
+      } else {
+        setOrderStatus(
+          row,
+          row.querySelector("[data-order-status]").textContent.trim().toLowerCase()
+        );
       }
     });
   };
@@ -385,7 +564,9 @@ const adminApp = document.querySelector("[data-admin-app]");
 
 if (adminApp) {
   const activeSellerCount = document.querySelector("[data-active-seller-count]");
+  const approvedItemCount = document.querySelector("[data-approved-item-count]");
   const pendingReviewCount = document.querySelector("[data-pending-review-count]");
+  const catalogAdminGrid = document.querySelector(".catalog-admin-grid");
   const submittedApplicationList = document.querySelector(
     "[data-submitted-application-list]"
   );
@@ -406,6 +587,26 @@ if (adminApp) {
     "needs-docs": "Needs docs",
     approved: "Approved",
     rejected: "Rejected",
+  };
+
+  if (approvedItemCount) approvedItemCount.textContent = appData.products.length;
+
+  const renderCatalogAdmin = () => {
+    if (!catalogAdminGrid || !appData.products.length) return;
+
+    catalogAdminGrid.innerHTML = appData.products
+      .map(
+        (product) => `
+          <article class="catalog-admin-card ${product.style}">
+            <img class="product-thumb" src="${product.image}" alt="${escapeHTML(product.name)} package" loading="lazy" />
+            <p class="card-label">${escapeHTML(product.brand)} | ${escapeHTML(product.categoryLabel)}</p>
+            <h3>${escapeHTML(product.name)}</h3>
+            <p>${escapeHTML(product.servingSize)} | ${escapeHTML(product.calories)} | Nutri-Score ${escapeHTML(product.nutriScore)}</p>
+            <a class="source-link" href="${product.sourceUrl}" target="_blank" rel="noreferrer">Open Food Facts #${escapeHTML(product.barcode)}</a>
+          </article>
+        `
+      )
+      .join("");
   };
 
   const setApprovalStatus = (row, status) => {
@@ -562,6 +763,7 @@ if (adminApp) {
   });
 
   applySavedAdminState();
+  renderCatalogAdmin();
   renderSubmittedApplications();
   updateAdminStats();
 }
