@@ -100,7 +100,7 @@ if (applicationApp) {
 if (buyerApp) {
   const searchInput = document.querySelector("[data-search-input]");
   const filterButtons = [...document.querySelectorAll("[data-filter]")];
-  const productCards = [...document.querySelectorAll("[data-product-card]")];
+  const productList = document.querySelector("[data-product-list]");
   const emptyState = document.querySelector("[data-empty-state]");
   const cartLines = document.querySelector("[data-cart-lines]");
   const cartTotal = document.querySelector("[data-cart-total]");
@@ -108,14 +108,56 @@ if (buyerApp) {
   const orderMessage = document.querySelector("[data-order-message]");
   const placeOrderButton = document.querySelector("[data-place-order]");
   const cart = new Map(
-    storage.get("candyLadyCart", []).map((item) => [item.name, item])
+    storage.get("candyLadyCart", []).map((item) => [item.id, item])
   );
   let activeFilter = "all";
+  let candies = [];
 
   const money = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
   });
+
+  const fetchCandies = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:5000/candies");
+      if (!response.ok) throw new Error("Failed to fetch candies");
+      candies = await response.json();
+      renderProductList();
+      filterProducts();
+    } catch (error) {
+      console.error("Error fetching candies:", error);
+      orderMessage.textContent = "Failed to load candies. Check backend server.";
+    }
+  };
+
+  const renderProductList = () => {
+    productList.innerHTML = candies
+      .map(
+        (candy) => `
+          <article
+            class="catalog-row strawberry"
+            data-product-card
+            data-category="candy"
+            data-open="true"
+            data-name="${candy.name}"
+            data-price="${(candy.price_cents / 100).toFixed(2)}"
+            data-candy-id="${candy.id}"
+          >
+            <div>
+              <p class="card-label">Available</p>
+              <h3>${candy.name}</h3>
+              <p>${candy.description || 'Stocked item'}</p>
+            </div>
+            <div class="catalog-actions">
+              <strong>${money.format(candy.price_cents / 100)}</strong>
+              <button class="mini-action" type="button" data-add-to-cart>Add</button>
+            </div>
+          </article>
+        `
+      )
+      .join("");
+  };
 
   const renderCart = () => {
     const items = [...cart.values()];
@@ -132,7 +174,7 @@ if (buyerApp) {
     cartLines.innerHTML = items
       .map(
         (item) => `
-          <article class="cart-item" data-cart-item="${item.name}">
+          <article class="cart-item" data-cart-item="${item.id}">
             <div class="cart-item-main">
               <strong>${item.name}</strong>
               <span>${money.format(item.price * item.qty)}</span>
@@ -140,9 +182,9 @@ if (buyerApp) {
             <div class="cart-item-controls">
               <span>${money.format(item.price)} each</span>
               <div class="qty-controls" aria-label="${item.name} quantity">
-                <button class="qty-button" type="button" data-cart-minus="${item.name}">-</button>
+                <button class="qty-button" type="button" data-cart-minus="${item.id}">-</button>
                 <strong>${item.qty}</strong>
-                <button class="qty-button" type="button" data-cart-plus="${item.name}">+</button>
+                <button class="qty-button" type="button" data-cart-plus="${item.id}">+</button>
               </div>
             </div>
           </article>
@@ -160,7 +202,7 @@ if (buyerApp) {
     const query = searchInput.value.trim().toLowerCase();
     let visibleCount = 0;
 
-    productCards.forEach((card) => {
+    document.querySelectorAll("[data-product-card]").forEach((card) => {
       const name = card.dataset.name.toLowerCase();
       const category = card.dataset.category;
       const isOpen = card.dataset.open === "true";
@@ -196,11 +238,13 @@ if (buyerApp) {
 
     if (addButton) {
       const card = addButton.closest("[data-product-card]");
+      const id = card.dataset.candyId;
       const name = card.dataset.name;
       const price = Number(card.dataset.price);
-      const existing = cart.get(name);
+      const existing = cart.get(id);
 
-      cart.set(name, {
+      cart.set(id, {
+        id,
         name,
         price,
         qty: existing ? existing.qty + 1 : 1,
@@ -210,42 +254,59 @@ if (buyerApp) {
     }
 
     if (plusButton) {
-      const name = plusButton.dataset.cartPlus;
-      const item = cart.get(name);
-      cart.set(name, { ...item, qty: item.qty + 1 });
+      const id = plusButton.dataset.cartPlus;
+      const item = cart.get(id);
+      cart.set(id, { ...item, qty: item.qty + 1 });
       renderCart();
     }
 
     if (minusButton) {
-      const name = minusButton.dataset.cartMinus;
-      const item = cart.get(name);
+      const id = minusButton.dataset.cartMinus;
+      const item = cart.get(id);
 
       if (item.qty === 1) {
-        cart.delete(name);
+        cart.delete(id);
       } else {
-        cart.set(name, { ...item, qty: item.qty - 1 });
+        cart.set(id, { ...item, qty: item.qty - 1 });
       }
 
       renderCart();
     }
   });
 
-  placeOrderButton.addEventListener("click", () => {
+  placeOrderButton.addEventListener("click", async () => {
     if (!cart.size) {
       orderMessage.textContent = "Add at least one snack before placing an order.";
       return;
     }
 
-    const code = `CL-${Math.floor(1000 + Math.random() * 9000)}`;
+    const items = [...cart.values()].map((item) => ({
+      candy_id: parseInt(item.id),
+      quantity: item.qty,
+    }));
 
-    storage.set("candyLadyLastPickupCode", code);
-    pickupCode.textContent = code;
-    orderMessage.textContent = `Pickup order placed. Show code ${code} at pickup.`;
-    cart.clear();
-    renderCart();
+    try {
+      const response = await fetch("http://127.0.0.1:5000/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: 1, items }),
+      });
+      if (!response.ok) throw new Error("Failed to place order");
+      const order = await response.json();
+      const code = `CL-${order.id}`;
+
+      storage.set("candyLadyLastPickupCode", code);
+      pickupCode.textContent = code;
+      orderMessage.textContent = `Pickup order placed. Show code ${code} at pickup.`;
+      cart.clear();
+      renderCart();
+    } catch (error) {
+      console.error("Error placing order:", error);
+      orderMessage.textContent = "Failed to place order. Try again.";
+    }
   });
 
-  filterProducts();
+  fetchCandies();
   renderCart();
   renderPickupCode();
 }
