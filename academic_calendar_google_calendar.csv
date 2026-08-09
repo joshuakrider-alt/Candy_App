@@ -1,0 +1,38 @@
+Subject,Start Date,End Date,All Day Event
+"PY101 · Introduction to Python programming",04/06/2026,05/04/2026,True
+"PSYC100 · General psychology",05/04/2026,05/18/2026,True
+"CS101 · Software engineering principles",05/18/2026,06/15/2026,True
+"Term Break",06/15/2026,06/22/2026,True
+"CS102 · Data structures & algorithms",06/22/2026,07/20/2026,True
+"HIST200 · American history since world war II",07/20/2026,08/03/2026,True
+"PY103 · Object-Oriented Programming",08/03/2026,08/31/2026,True
+"Term Break",08/31/2026,09/07/2026,True
+"FE101 · Introduction to modern JavaScript & TypeScript",09/07/2026,10/05/2026,True
+"ENGL100 · English composition",10/05/2026,10/19/2026,True
+"BE101 · Web fundamentals",10/19/2026,11/16/2026,True
+"Term Break",11/16/2026,11/23/2026,True
+"FE102 · Building interactive UIs",11/23/2026,12/21/2026,True
+"Winter Break",12/21/2026,12/28/2026,True
+"Winter Break",12/28/2026,01/04/2027,True
+"ENVR100 · Global Environmental Change",01/04/2027,01/18/2027,True
+"BE102 · RESTful API Development",01/18/2027,02/15/2027,True
+"Term Break",02/15/2027,02/22/2027,True
+"BE103 · Databases: SQL & NoSQL Basics",02/22/2027,03/22/2027,True
+"SPH100 · Essentials of public speaking",03/22/2027,04/05/2027,True
+"BE104 · Authentication, Authorization, and Middleware",04/05/2027,05/03/2027,True
+"Term Break",05/03/2027,05/10/2027,True
+"BE105 · Advanced Backend Concepts and Microservices",05/10/2027,06/07/2027,True
+"CD101 · Professional profiles and personal branding",06/07/2027,06/21/2027,True
+"BE106 · Backend project",06/21/2027,07/19/2027,True
+"Term Break",07/19/2027,07/26/2027,True
+"AI101 · Introduction to AI concepts & math foundations",07/26/2027,08/23/2027,True
+"MATH100 · College mathematics",08/23/2027,09/06/2027,True
+"AI102 · Fundamentals of machine learning",09/06/2027,10/04/2027,True
+"Term Break",10/04/2027,10/11/2027,True
+"AI103 · Prompt engineering & working with LLMs",10/11/2027,11/08/2027,True
+"CD102 · AI project portfolio development",11/08/2027,11/22/2027,True
+"FE103 · Frontend integration project",11/22/2027,12/20/2027,True
+"Term Break",12/27/2027,01/03/2028,True
+"AI104 · Applied AI capstone project",01/03/2028,01/31/2028,True
+"CD103 · AI career strategy and interview preparation",01/31/2028,02/21/2028,True
+"CD104 · AI career launch workshop",02/21/2028,03/13/2028,True

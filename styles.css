@@ -778,6 +778,54 @@ h3 {
   padding: 18px;
 }
 
+.catalog-copy {
+  flex: 1;
+}
+
+.product-thumb {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  align-self: center;
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(68, 37, 29, 0.08);
+}
+
+.product-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.product-facts span,
+.product-facts a,
+.source-link,
+.data-source {
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.product-facts span,
+.product-facts a {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.source-link,
+.data-source a {
+  color: #b83b15;
+}
+
+.data-source {
+  margin: 4px 0 0;
+  opacity: 0.72;
+  line-height: 1.5;
+}
+
 .catalog-row[hidden] {
   display: none;
 }
