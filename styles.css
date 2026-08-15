@@ -557,6 +557,10 @@ h3 {
   gap: 22px;
 }
 
+.login-panel {
+  margin-bottom: 22px;
+}
+
 .app-hero,
 .app-panel,
 .filter-bar,
@@ -893,11 +897,13 @@ h3 {
   justify-content: flex-end;
 }
 
-.inventory-card[data-stock-status="out"] {
+.inventory-card[data-stock-status="out"],
+.inventory-card[data-stock-status="out-of-stock"] {
   opacity: 0.62;
 }
 
-.inventory-card[data-stock-status="out"] .mini-action {
+.inventory-card[data-stock-status="out"] .mini-action,
+.inventory-card[data-stock-status="out-of-stock"] .mini-action {
   background: var(--cherry);
 }
 

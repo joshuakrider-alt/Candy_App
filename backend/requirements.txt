@@ -3,3 +3,4 @@ Flask-CORS
 Flask-JWT-Extended
 Flask-SQLAlchemy
 SQLAlchemy
+psycopg2-binary

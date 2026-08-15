@@ -42,6 +42,7 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
       "candyLadyAdminState",
       "candyLadyLastPickupCode",
       "candyLadyApplications",
+      "candyLadyToken",
     ].forEach((key) => storage.remove(key));
 
     window.location.reload();
@@ -51,6 +52,108 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
 const buyerApp = document.querySelector("[data-buyer-app]");
 
 const API_BASE_URL = "http://127.0.0.1:5000";
+const auth = {
+  tokenKey: "candyLadyToken",
+  getToken() {
+    return localStorage.getItem(this.tokenKey);
+  },
+  setToken(token) {
+    localStorage.setItem(this.tokenKey, token);
+  },
+  clearToken() {
+    localStorage.removeItem(this.tokenKey);
+  },
+  isLoggedIn() {
+    return Boolean(this.getToken());
+  },
+};
+
+const authFetch = async (url, options = {}) => {
+  const headers = new Headers(options.headers || {});
+  const token = auth.getToken();
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401) {
+    auth.clearToken();
+    window.dispatchEvent(new CustomEvent("candy-auth-required"));
+  }
+  return response;
+};
+
+const initAuthGate = (root, onLogin) => {
+  const loginPanel = root.querySelector("[data-login-panel]");
+  const dashboard = root.querySelector("[data-dashboard-main]");
+  const loginForm = root.querySelector("[data-login-form]");
+  const loginMessage = root.querySelector("[data-login-message]");
+  const logoutButton = root.querySelector("[data-logout]");
+
+  if (!loginPanel || !dashboard || !loginForm) {
+    onLogin();
+    return;
+  }
+
+  const showLoginForm = (message = "") => {
+    loginPanel.hidden = false;
+    dashboard.hidden = true;
+    if (logoutButton) logoutButton.hidden = true;
+    if (loginMessage) loginMessage.textContent = message;
+  };
+
+  const showDashboard = () => {
+    loginPanel.hidden = true;
+    dashboard.hidden = false;
+    if (logoutButton) logoutButton.hidden = false;
+    if (loginMessage) loginMessage.textContent = "";
+    onLogin();
+  };
+
+  window.addEventListener("candy-auth-required", () => {
+    showLoginForm("Session expired. Log in again to continue.");
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(loginForm);
+    if (loginMessage) loginMessage.textContent = "Logging in...";
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.get("email").trim(),
+          password: formData.get("password"),
+        }),
+      });
+      if (!response.ok) throw new Error("Login failed");
+
+      const data = await response.json();
+      auth.setToken(data.access_token);
+      showDashboard();
+    } catch (error) {
+      console.error(error);
+      showLoginForm("Could not log in. Use a seeded email and password.");
+    }
+  });
+
+  if (logoutButton) {
+    logoutButton.addEventListener("click", () => {
+      auth.clearToken();
+      showLoginForm("Logged out.");
+    });
+  }
+
+  if (auth.isLoggedIn()) {
+    showDashboard();
+  } else {
+    showLoginForm();
+  }
+};
+
 const applicationApp = document.querySelector("[data-application-app]");
 
 if (applicationApp) {
@@ -358,8 +461,8 @@ if (sellerApp) {
   const loadSellerDashboard = async () => {
     try {
       const [inventoryResponse, ordersResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/sellers/${sellerId}/inventory`),
-        fetch(`${API_BASE_URL}/sellers/${sellerId}/orders`),
+        authFetch(`${API_BASE_URL}/sellers/${sellerId}/inventory`),
+        authFetch(`${API_BASE_URL}/sellers/${sellerId}/orders`),
       ]);
       if (!inventoryResponse.ok || !ordersResponse.ok) throw new Error("Unable to load seller dashboard");
       renderInventory(await inventoryResponse.json());
@@ -377,7 +480,7 @@ if (sellerApp) {
       if (stockButton) {
         const card = stockButton.closest("[data-inventory-card]");
         const status = card.dataset.stockStatus === "out-of-stock" ? "in-stock" : "out-of-stock";
-        const response = await fetch(`${API_BASE_URL}/sellers/${sellerId}/inventory/${card.dataset.candyId}`, {
+        const response = await authFetch(`${API_BASE_URL}/sellers/${sellerId}/inventory/${card.dataset.candyId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
         });
         if (!response.ok) throw new Error("Unable to update inventory");
@@ -387,7 +490,7 @@ if (sellerApp) {
         const row = orderButton.closest("[data-order-row]");
         const current = row.querySelector("[data-order-status]").textContent.trim().toLowerCase();
         const status = { new: "packing", packing: "ready", ready: "completed" }[current];
-        const response = await fetch(`${API_BASE_URL}/orders/${row.dataset.orderId}/status`, {
+        const response = await authFetch(`${API_BASE_URL}/orders/${row.dataset.orderId}/status`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
         });
         if (!response.ok) throw new Error("Unable to update order");
@@ -398,7 +501,7 @@ if (sellerApp) {
     }
   });
 
-  loadSellerDashboard();
+  initAuthGate(sellerApp, loadSellerDashboard);
 }
 
 const adminApp = document.querySelector("[data-admin-app]");
@@ -448,8 +551,8 @@ if (adminApp) {
   const loadPendingApplications = async () => {
     try {
       const [pendingResponse, approvedResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/applications?status=pending`),
-        fetch(`${API_BASE_URL}/applications?status=approved`),
+        authFetch(`${API_BASE_URL}/applications?status=pending`),
+        authFetch(`${API_BASE_URL}/applications?status=approved`),
       ]);
       if (!pendingResponse.ok || !approvedResponse.ok) throw new Error("Unable to load applications");
       activeSellerCount.textContent = (await approvedResponse.json()).length;
@@ -469,7 +572,7 @@ if (adminApp) {
 
     try {
       const status = approveButton ? "approved" : "rejected";
-      const response = await fetch(`${API_BASE_URL}/applications/${row.dataset.sellerId}`, {
+      const response = await authFetch(`${API_BASE_URL}/applications/${row.dataset.sellerId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -481,5 +584,5 @@ if (adminApp) {
     }
   });
 
-  loadPendingApplications();
+  initAuthGate(adminApp, loadPendingApplications);
 }

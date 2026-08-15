@@ -2,7 +2,12 @@ import os
 
 from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    jwt_required,
+    verify_jwt_in_request,
+)
 
 from models import Candy, Order, OrderItem, Seller, SellerInventory, User, db
 
@@ -13,8 +18,12 @@ ORDER_STATUSES = {"new", "packing", "ready", "completed"}
 
 def create_app():
     app = Flask(__name__)
-    db_path = os.path.join(os.path.dirname(__file__), "data.db")
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        db_path = os.path.join(os.path.dirname(__file__), "data.db")
+        database_url = f"sqlite:///{db_path}"
+
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["JWT_SECRET_KEY"] = os.environ.get(
         "JWT_SECRET_KEY",
@@ -116,6 +125,7 @@ def create_app():
     @app.route("/applications", methods=["GET", "POST"])
     def create_application():
         if request.method == "GET":
+            verify_jwt_in_request()
             status = request.args.get("status")
             query = Seller.query
             if status:
@@ -191,6 +201,7 @@ def create_app():
 
     # Seller fulfillment queue
     @app.route("/sellers/<int:seller_id>/orders", methods=["GET"])
+    @jwt_required()
     def get_seller_orders(seller_id):
         Seller.query.get_or_404(seller_id)
         orders = (
@@ -261,6 +272,7 @@ def create_app():
         return jsonify(order.to_dict()), 201
 
     @app.route("/orders/<int:order_id>/status", methods=["PUT"])
+    @jwt_required()
     def update_order_status(order_id):
         order = Order.query.get_or_404(order_id)
         data = request.get_json() or {}

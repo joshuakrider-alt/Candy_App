@@ -21,11 +21,32 @@
           <a href="seller.html">Seller demo</a>
           <a class="active-link" href="admin.html">Admin demo</a>
           <a href="apply.html">Apply</a>
+          <button class="nav-action" type="button" data-logout hidden>Log out</button>
           <button class="nav-action" type="button" data-reset-demo>Reset demo</button>
         </div>
       </nav>
 
-      <main class="app-layout">
+      <section class="app-panel login-panel reveal" data-login-panel>
+        <div class="section-heading">
+          <p class="eyebrow">Admin login</p>
+          <h1 class="app-title">Sign in to review sellers.</h1>
+          <p class="hero-text">Use a seeded buyer email for this prototype. The shared password is password.</p>
+        </div>
+        <form class="application-form" data-login-form>
+          <label class="form-field">
+            Email
+            <input type="email" name="email" value="alice@example.com" required />
+          </label>
+          <label class="form-field">
+            Password
+            <input type="password" name="password" value="password" required />
+          </label>
+          <button class="primary-button dark" type="submit">Log in</button>
+          <p class="order-message" data-login-message></p>
+        </form>
+      </section>
+
+      <main class="app-layout" data-dashboard-main hidden>
         <section class="app-hero reveal">
           <div>
             <p class="eyebrow">Platform controls</p>
