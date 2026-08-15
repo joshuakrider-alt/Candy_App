@@ -1,6 +1,22 @@
-Flask
-Flask-CORS
-Flask-JWT-Extended
-Flask-SQLAlchemy
-SQLAlchemy
-psycopg2-binary
+altgraph @ file:///AppleInternal/Library/BuildRoots/4~CQH2ugAdEkxx3ZkrZolIWlkoB3pJrxMjVv7CK8s/Library/Caches/com.apple.xbs/TemporaryDirectory.1I3Zwu/Sources/python3/altgraph-0.17.2-py2.py3-none-any.whl
+blinker==1.9.0
+click==8.1.8
+Flask==3.1.3
+flask-cors==6.0.5
+Flask-JWT-Extended==4.7.1
+Flask-SQLAlchemy==3.1.1
+future @ file:///AppleInternal/Library/BuildRoots/4~CQH2ugAdEkxx3ZkrZolIWlkoB3pJrxMjVv7CK8s/Library/Caches/com.apple.xbs/TemporaryDirectory.1I3Zwu/Sources/python3/future-0.18.2-py3-none-any.whl
+gunicorn==23.0.0
+importlib_metadata==8.7.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+macholib @ file:///AppleInternal/Library/BuildRoots/4~CQH2ugAdEkxx3ZkrZolIWlkoB3pJrxMjVv7CK8s/Library/Caches/com.apple.xbs/TemporaryDirectory.1I3Zwu/Sources/python3/macholib-1.15.2-py2.py3-none-any.whl
+MarkupSafe==3.0.3
+packaging==26.3
+psycopg2-binary==2.9.12
+PyJWT==2.13.0
+six @ file:///AppleInternal/Library/BuildRoots/4~CQH2ugAdEkxx3ZkrZolIWlkoB3pJrxMjVv7CK8s/Library/Caches/com.apple.xbs/TemporaryDirectory.1I3Zwu/Sources/python3/six-1.15.0-py2.py3-none-any.whl
+SQLAlchemy==2.0.52
+typing_extensions==4.16.0
+Werkzeug==3.1.8
+zipp==3.23.1
