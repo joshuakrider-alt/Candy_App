@@ -51,7 +51,7 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
 
 const buyerApp = document.querySelector("[data-buyer-app]");
 
-const API_BASE_URL = "http://127.0.0.1:5000";
+const API_BASE_URL = "https://candy-lady-api.onrender.com";
 const auth = {
   tokenKey: "candyLadyToken",
   getToken() {
