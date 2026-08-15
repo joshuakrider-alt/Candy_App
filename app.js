@@ -50,6 +50,7 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
 
 const buyerApp = document.querySelector("[data-buyer-app]");
 
+const API_BASE_URL = "http://127.0.0.1:5000";
 const applicationApp = document.querySelector("[data-application-app]");
 
 if (applicationApp) {
@@ -57,44 +58,42 @@ if (applicationApp) {
   const message = document.querySelector("[data-application-message]");
   const preview = document.querySelector("[data-application-preview]");
 
-  const renderApplicationPreview = () => {
-    const applications = storage.get("candyLadyApplications", []);
-    const latest = applications.at(-1);
-
-    if (!latest) return;
-
+  const renderApplicationPreview = (seller) => {
     preview.innerHTML = `
-      <div><span>Status</span><strong>Pending review</strong></div>
-      <div><span>Shop</span><strong>${latest.shopName}</strong></div>
-      <div><span>Neighborhood</span><strong>${latest.neighborhood}</strong></div>
-      <div><span>Categories</span><strong>${latest.categories.join(", ") || "None selected"}</strong></div>
+      <div><span>Status</span><strong>${seller.status}</strong></div>
+      <div><span>Shop</span><strong>${seller.shop_name}</strong></div>
+      <div><span>Neighborhood</span><strong>${seller.neighborhood}</strong></div>
+      <div><span>Pickup window</span><strong>${seller.pickup_window}</strong></div>
     `;
   };
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
-
     const formData = new FormData(form);
-    const applications = storage.get("candyLadyApplications", []);
-    const application = {
-      id: `app-${Date.now()}`,
-      shopName: formData.get("shopName").trim(),
-      contactName: formData.get("contactName").trim(),
-      neighborhood: formData.get("neighborhood").trim(),
-      pickupWindow: formData.get("pickupWindow").trim(),
-      pickupNotes: formData.get("pickupNotes").trim(),
-      categories: formData.getAll("categories"),
-      status: "pending",
-      submittedAt: new Date().toISOString(),
-    };
+    message.textContent = "Submitting application…";
 
-    storage.set("candyLadyApplications", [...applications, application]);
-    message.textContent = "Application saved for demo review.";
-    form.reset();
-    renderApplicationPreview();
+    try {
+      const response = await fetch(`${API_BASE_URL}/applications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shop_name: formData.get("shopName").trim(),
+          contact_name: formData.get("contactName").trim(),
+          neighborhood: formData.get("neighborhood").trim(),
+          pickup_window: formData.get("pickupWindow").trim(),
+        }),
+      });
+      if (!response.ok) throw new Error("Unable to submit application");
+
+      const seller = await response.json();
+      renderApplicationPreview(seller);
+      form.reset();
+      message.textContent = "Application submitted for admin review.";
+    } catch (error) {
+      console.error(error);
+      message.textContent = "Could not submit application. Is the backend running?";
+    }
   });
-
-  renderApplicationPreview();
 }
 
 if (buyerApp) {
@@ -120,7 +119,7 @@ if (buyerApp) {
 
   const fetchCandies = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:5000/candies");
+      const response = await fetch(`${API_BASE_URL}/candies`);
       if (!response.ok) throw new Error("Failed to fetch candies");
       candies = await response.json();
       renderProductList();
@@ -286,10 +285,10 @@ if (buyerApp) {
     }));
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/orders", {
+      const response = await fetch(`${API_BASE_URL}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: 1, items }),
+        body: JSON.stringify({ user_id: 1, seller_id: 1, items }),
       });
       if (!response.ok) throw new Error("Failed to place order");
       const order = await response.json();
@@ -314,132 +313,92 @@ if (buyerApp) {
 const sellerApp = document.querySelector("[data-seller-app]");
 
 if (sellerApp) {
-  const stockCards = [...document.querySelectorAll("[data-inventory-card]")];
   const inStockCount = document.querySelector("[data-in-stock-count]");
   const activeOrderCount = document.querySelector("[data-seller-order-count]");
-  const savedSellerState = storage.get("candyLadySellerState", {
-    stock: {},
-    orders: {},
-  });
-
-  const stockLabels = {
-    in: "In stock",
-    low: "Low stock",
-    out: "Out of stock",
-  };
+  const inventoryGrid = document.querySelector(".inventory-grid");
+  const orderList = document.querySelector(".order-list");
+  const sellerId = 1;
 
   const orderButtons = {
     new: "Start packing",
     packing: "Mark ready",
     ready: "Complete",
-    completed: "Remove",
   };
 
   const orderClasses = {
     new: "waiting",
     packing: "prepping",
     ready: "ready",
-    completed: "done",
   };
 
-  const saveSellerState = () => {
-    const stock = Object.fromEntries(
-      stockCards.map((card) => [card.dataset.stockId, card.dataset.stockStatus])
-    );
-    const orders = Object.fromEntries(
-      [...document.querySelectorAll("[data-order-row]")].map((row) => {
-        const status = row.querySelector("[data-order-status]").textContent
-          .trim()
-          .toLowerCase();
-        return [row.dataset.orderId, status];
-      })
-    );
+  const titleCase = (value) => value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 
-    storage.set("candyLadySellerState", { stock, orders });
+  const renderInventory = (inventory) => {
+    inventoryGrid.innerHTML = inventory.map((item) => `
+      <article class="inventory-card strawberry" data-inventory-card data-candy-id="${item.candy_id}" data-stock-status="${item.status}">
+        <div><p class="card-label">Catalog item</p><h3>${item.candy.name}</h3></div>
+        <div class="inventory-meta">
+          <span>$${(item.candy.price_cents / 100).toFixed(2)} · ${item.inventory_count} left</span>
+          <strong data-stock-label>${titleCase(item.status)}</strong>
+          <button class="mini-action" type="button" data-toggle-stock>${item.status === "out-of-stock" ? "Mark in stock" : "Mark out"}</button>
+        </div>
+      </article>`).join("") || '<p class="empty-state">No inventory assigned yet.</p>';
+    inStockCount.textContent = inventory.filter((item) => item.status !== "out-of-stock").length;
   };
 
-  const setOrderStatus = (row, statusName) => {
-    const status = row.querySelector("[data-order-status]");
-    const button = row.querySelector("[data-next-order-status]");
-    const normalizedStatus = statusName.toLowerCase();
-
-    status.classList.remove("waiting", "prepping", "ready", "done");
-    status.textContent =
-      normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
-    status.classList.add(orderClasses[normalizedStatus]);
-    button.textContent = orderButtons[normalizedStatus];
+  const renderOrders = (orders) => {
+    orderList.innerHTML = orders.map((order) => `
+      <article class="order-row" data-order-row data-order-id="${order.id}">
+        <div><strong>Order #${order.id}</strong><p>${order.items.map((item) => `${item.quantity} ${item.candy.name}`).join(", ")}</p></div>
+        <div class="row-actions"><span class="status-pill ${orderClasses[order.status]}" data-order-status>${titleCase(order.status)}</span>${order.status === "ready" || order.status === "new" || order.status === "packing" ? `<button class="mini-action" type="button" data-next-order-status>${orderButtons[order.status]}</button>` : ""}</div>
+      </article>`).join("") || '<p class="empty-state">No active pickup orders.</p>';
+    activeOrderCount.textContent = orders.length;
   };
 
-  const applySavedSellerState = () => {
-    stockCards.forEach((card) => {
-      const savedStatus = savedSellerState.stock[card.dataset.stockId];
-      const status = savedStatus || card.dataset.stockStatus;
-      const label = card.querySelector("[data-stock-label]");
-      const toggleButton = card.querySelector("[data-toggle-stock]");
-
-      card.dataset.stockStatus = status;
-      label.textContent = stockLabels[status];
-      toggleButton.textContent = status === "out" ? "Mark in" : "Mark out";
-    });
-
-    document.querySelectorAll("[data-order-row]").forEach((row) => {
-      const savedStatus = savedSellerState.orders[row.dataset.orderId];
-
-      if (savedStatus) {
-        setOrderStatus(row, savedStatus);
-      }
-    });
-  };
-
-  const updateSellerStats = () => {
-    const stockedItems = stockCards.filter(
-      (card) => card.dataset.stockStatus !== "out"
-    ).length;
-    const activeOrders = document.querySelectorAll("[data-order-row]").length;
-
-    inStockCount.textContent = stockedItems;
-    activeOrderCount.textContent = activeOrders;
-  };
-
-  document.addEventListener("click", (event) => {
-    const toggleButton = event.target.closest("[data-toggle-stock]");
-    const orderButton = event.target.closest("[data-next-order-status]");
-
-    if (toggleButton) {
-      const card = toggleButton.closest("[data-inventory-card]");
-      const nextStatus = card.dataset.stockStatus === "out" ? "in" : "out";
-      const label = card.querySelector("[data-stock-label]");
-
-      card.dataset.stockStatus = nextStatus;
-      label.textContent = stockLabels[nextStatus];
-      toggleButton.textContent = nextStatus === "out" ? "Mark in" : "Mark out";
-      updateSellerStats();
+  const loadSellerDashboard = async () => {
+    try {
+      const [inventoryResponse, ordersResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/sellers/${sellerId}/inventory`),
+        fetch(`${API_BASE_URL}/sellers/${sellerId}/orders`),
+      ]);
+      if (!inventoryResponse.ok || !ordersResponse.ok) throw new Error("Unable to load seller dashboard");
+      renderInventory(await inventoryResponse.json());
+      renderOrders(await ordersResponse.json());
+    } catch (error) {
+      console.error(error);
+      orderList.innerHTML = '<p class="empty-state">Could not load seller data. Is the backend running?</p>';
     }
+  };
 
-    if (orderButton) {
-      const row = orderButton.closest("[data-order-row]");
-      const currentStatus = row
-        .querySelector("[data-order-status]")
-        .textContent.trim()
-        .toLowerCase();
-
-      if (currentStatus === "new") {
-        setOrderStatus(row, "packing");
-      } else if (currentStatus === "packing") {
-        setOrderStatus(row, "ready");
-      } else if (currentStatus === "ready") {
-        setOrderStatus(row, "completed");
-      } else {
-        row.remove();
+  document.addEventListener("click", async (event) => {
+    const stockButton = event.target.closest("[data-toggle-stock]");
+    const orderButton = event.target.closest("[data-next-order-status]");
+    try {
+      if (stockButton) {
+        const card = stockButton.closest("[data-inventory-card]");
+        const status = card.dataset.stockStatus === "out-of-stock" ? "in-stock" : "out-of-stock";
+        const response = await fetch(`${API_BASE_URL}/sellers/${sellerId}/inventory/${card.dataset.candyId}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+        });
+        if (!response.ok) throw new Error("Unable to update inventory");
+        loadSellerDashboard();
       }
-
-      updateSellerStats();
-      saveSellerState();
+      if (orderButton) {
+        const row = orderButton.closest("[data-order-row]");
+        const current = row.querySelector("[data-order-status]").textContent.trim().toLowerCase();
+        const status = { new: "packing", packing: "ready", ready: "completed" }[current];
+        const response = await fetch(`${API_BASE_URL}/orders/${row.dataset.orderId}/status`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+        });
+        if (!response.ok) throw new Error("Unable to update order");
+        loadSellerDashboard();
+      }
+    } catch (error) {
+      console.error(error);
     }
   });
 
-  applySavedSellerState();
-  updateSellerStats();
+  loadSellerDashboard();
 }
 
 const adminApp = document.querySelector("[data-admin-app]");
@@ -447,182 +406,80 @@ const adminApp = document.querySelector("[data-admin-app]");
 if (adminApp) {
   const activeSellerCount = document.querySelector("[data-active-seller-count]");
   const pendingReviewCount = document.querySelector("[data-pending-review-count]");
-  const submittedApplicationList = document.querySelector(
-    "[data-submitted-application-list]"
-  );
-  const savedAdminState = storage.get("candyLadyAdminState", {
-    activeSellers: Number(activeSellerCount.textContent),
-    approvals: {},
-  });
+  const submittedApplicationList = adminApp.querySelector(".approval-list");
 
   const approvalClasses = {
     pending: "waiting",
-    "needs-docs": "prepping",
     approved: "approved",
     rejected: "rejected",
   };
 
   const approvalLabels = {
     pending: "Pending",
-    "needs-docs": "Needs docs",
     approved: "Approved",
     rejected: "Rejected",
   };
 
-  const setApprovalStatus = (row, status) => {
-    const label = row.querySelector("[data-approval-label]");
-    row.dataset.approvalStatus = status;
-    label.classList.remove("waiting", "prepping", "approved", "rejected");
-    label.textContent = approvalLabels[status];
-    label.classList.add(approvalClasses[status]);
-
-    if (["approved", "rejected"].includes(status)) {
-      row.querySelectorAll("button").forEach((button) => {
-        button.disabled = true;
-        button.classList.add("disabled-action");
-      });
-    }
-  };
-
-  const saveAdminState = () => {
-    const approvals = Object.fromEntries(
-      [...document.querySelectorAll("[data-approval-row]")].map((row) => [
-        row.dataset.approvalId,
-        row.dataset.approvalStatus,
-      ])
-    );
-
-    storage.set("candyLadyAdminState", {
-      activeSellers: Number(activeSellerCount.textContent),
-      approvals,
-    });
-  };
-
-  const applySavedAdminState = () => {
-    activeSellerCount.textContent = savedAdminState.activeSellers;
-
-    document.querySelectorAll("[data-approval-row]").forEach((row) => {
-      const status =
-        savedAdminState.approvals[row.dataset.approvalId] ||
-        row.dataset.approvalStatus;
-      setApprovalStatus(row, status);
-    });
-  };
-
-  const updateAdminStats = () => {
-    const applications = storage.get("candyLadyApplications", []);
-    const pendingRows = [
-      ...document.querySelectorAll("[data-approval-row]"),
-    ].filter((row) => {
-      return !["approved", "rejected"].includes(row.dataset.approvalStatus);
-    });
-    const pendingApplications = applications.filter((application) => {
-      return !["approved", "rejected"].includes(application.status);
-    });
-
-    pendingReviewCount.textContent = pendingRows.length + pendingApplications.length;
-  };
-
-  const saveApplications = (applications) => {
-    storage.set("candyLadyApplications", applications);
-  };
-
-  const renderSubmittedApplications = () => {
-    const applications = storage.get("candyLadyApplications", []);
-
+  const renderApplications = (applications) => {
+    pendingReviewCount.textContent = applications.length;
     if (!applications.length) {
       submittedApplicationList.innerHTML =
-        '<p class="empty-state">No submitted applications yet.</p>';
+        '<p class="empty-state">No applications waiting for review.</p>';
       return;
     }
 
     submittedApplicationList.innerHTML = applications
-      .map((application) => {
-        const statusClass = approvalClasses[application.status] || "waiting";
-        const statusLabel = approvalLabels[application.status] || "Pending";
-        const disabled = ["approved", "rejected"].includes(application.status)
-          ? "disabled"
-          : "";
-        const disabledClass = disabled ? " disabled-action" : "";
-
-        return `
-          <article class="approval-row" data-submitted-application-id="${application.id}">
+      .map((seller) => `
+          <article class="approval-row" data-seller-id="${seller.id}">
             <div>
-              <strong>${application.shopName}</strong>
-              <p>${application.neighborhood} | ${application.pickupWindow}</p>
-              <p>Requested categories: ${application.categories.join(", ") || "None selected"}</p>
-              <p>Contact: ${application.contactName}</p>
+              <strong>${seller.shop_name}</strong>
+              <p>${seller.neighborhood} | ${seller.pickup_window}</p>
+              <p>Contact: ${seller.contact_name}</p>
             </div>
             <div class="approval-actions">
-              <span class="status-pill ${statusClass}">${statusLabel}</span>
-              <button class="mini-action${disabledClass}" type="button" data-approve-application ${disabled}>Approve</button>
-              <button class="soft-action${disabledClass}" type="button" data-reject-application ${disabled}>Reject</button>
+              <span class="status-pill ${approvalClasses[seller.status]}">${approvalLabels[seller.status]}</span>
+              <button class="mini-action" type="button" data-approve-seller>Approve</button>
+              <button class="soft-action" type="button" data-reject-seller>Reject</button>
             </div>
-          </article>
-        `;
-      })
+          </article>`)
       .join("");
   };
 
-  document.addEventListener("click", (event) => {
+  const loadPendingApplications = async () => {
+    try {
+      const [pendingResponse, approvedResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/applications?status=pending`),
+        fetch(`${API_BASE_URL}/applications?status=approved`),
+      ]);
+      if (!pendingResponse.ok || !approvedResponse.ok) throw new Error("Unable to load applications");
+      activeSellerCount.textContent = (await approvedResponse.json()).length;
+      renderApplications(await pendingResponse.json());
+    } catch (error) {
+      console.error(error);
+      submittedApplicationList.innerHTML = '<p class="empty-state">Could not load applications. Is the backend running?</p>';
+    }
+  };
+
+  document.addEventListener("click", async (event) => {
     const approveButton = event.target.closest("[data-approve-seller]");
     const rejectButton = event.target.closest("[data-reject-seller]");
-    const approveApplicationButton = event.target.closest(
-      "[data-approve-application]"
-    );
-    const rejectApplicationButton = event.target.closest(
-      "[data-reject-application]"
-    );
+    if (!approveButton && !rejectButton) return;
+    const row = event.target.closest("[data-seller-id]");
+    if (!row) return;
 
-    if (
-      !approveButton &&
-      !rejectButton &&
-      !approveApplicationButton &&
-      !rejectApplicationButton
-    ) {
-      return;
-    }
-
-    if (approveApplicationButton || rejectApplicationButton) {
-      const row = event.target.closest("[data-submitted-application-id]");
-      const applicationId = row.dataset.submittedApplicationId;
-      const applications = storage.get("candyLadyApplications", []);
-      const updatedApplications = applications.map((application) => {
-        if (application.id !== applicationId) return application;
-
-        return {
-          ...application,
-          status: approveApplicationButton ? "approved" : "rejected",
-        };
+    try {
+      const status = approveButton ? "approved" : "rejected";
+      const response = await fetch(`${API_BASE_URL}/applications/${row.dataset.sellerId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
       });
-
-      if (approveApplicationButton) {
-        activeSellerCount.textContent = String(Number(activeSellerCount.textContent) + 1);
-      }
-
-      saveApplications(updatedApplications);
-      renderSubmittedApplications();
-      updateAdminStats();
-      saveAdminState();
-      return;
+      if (!response.ok) throw new Error("Unable to update seller status");
+      loadPendingApplications();
+    } catch (error) {
+      console.error(error);
     }
-
-    const row = event.target.closest("[data-approval-row]");
-
-    if (approveButton) {
-      setApprovalStatus(row, "approved");
-      activeSellerCount.textContent = String(Number(activeSellerCount.textContent) + 1);
-    }
-
-    if (rejectButton) {
-      setApprovalStatus(row, "rejected");
-    }
-
-    updateAdminStats();
-    saveAdminState();
   });
 
-  applySavedAdminState();
-  renderSubmittedApplications();
-  updateAdminStats();
+  loadPendingApplications();
 }
