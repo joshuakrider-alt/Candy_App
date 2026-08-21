@@ -34,9 +34,12 @@ def create_app():
         "password",
     )
 
+    cors_origins = os.environ.get("CORS_ORIGINS")
+    origins = [o.strip() for o in cors_origins.split(",") if o.strip()] if cors_origins else "*"
+
     db.init_app(app)
     JWTManager(app)
-    CORS(app)
+    CORS(app, origins=origins)
 
     with app.app_context():
         db.create_all()
