@@ -25,6 +25,7 @@ Authentication:
 - `POST /login` accepts `email` and `password`.
 - For this prototype, any seeded user can log in with the shared password `password`.
 - Seller/admin routes require `Authorization: Bearer <access_token>`.
+- User/order reads and candy writes (POST/PUT/DELETE) now need a Bearer token.
 
 Available endpoints (examples):
 - `GET /candies`

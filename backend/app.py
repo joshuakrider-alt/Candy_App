@@ -73,6 +73,7 @@ def create_app():
         return jsonify(Candy.query.get_or_404(candy_id).to_dict())
 
     @app.route("/candies", methods=["POST"])
+    @jwt_required()
     def create_candy():
         data = request.get_json() or {}
         if "name" not in data or "price_cents" not in data:
@@ -88,6 +89,7 @@ def create_app():
         return jsonify(candy.to_dict()), 201
 
     @app.route("/candies/<int:candy_id>", methods=["PUT"])
+    @jwt_required()
     def update_candy(candy_id):
         candy = Candy.query.get_or_404(candy_id)
         data = request.get_json() or {}
@@ -98,6 +100,7 @@ def create_app():
         return jsonify(candy.to_dict())
 
     @app.route("/candies/<int:candy_id>", methods=["DELETE"])
+    @jwt_required()
     def delete_candy(candy_id):
         candy = Candy.query.get_or_404(candy_id)
         db.session.delete(candy)
@@ -106,6 +109,7 @@ def create_app():
 
     # Buyers
     @app.route("/users", methods=["GET"])
+    @jwt_required()
     def list_users():
         return jsonify([user.to_dict() for user in User.query.all()])
 
@@ -114,6 +118,7 @@ def create_app():
         return jsonify(User.query.get_or_404(user_id).to_dict())
 
     @app.route("/users", methods=["POST"])
+    @jwt_required()
     def create_user():
         data = request.get_json() or {}
         if "name" not in data or "email" not in data:
@@ -219,10 +224,12 @@ def create_app():
 
     # Orders
     @app.route("/orders", methods=["GET"])
+    @jwt_required()
     def list_orders():
         return jsonify([order.to_dict() for order in Order.query.all()])
 
     @app.route("/orders/<int:order_id>", methods=["GET"])
+    @jwt_required()
     def get_order(order_id):
         return jsonify(Order.query.get_or_404(order_id).to_dict())
 
