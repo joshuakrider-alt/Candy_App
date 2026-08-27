@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>The Candy Lady | Buyer Demo</title>
+    <title>The Candy Lady | Shop</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,26 +17,26 @@
       <nav class="topbar app-topbar">
         <a class="brand-pill" href="index.html">The Candy Lady</a>
         <div class="topbar-links">
-          <a class="active-link" href="buyer.html">Buyer demo</a>
-          <a href="seller.html">Seller demo</a>
-          <a href="admin.html">Admin demo</a>
+          <a class="active-link" href="buyer.html">Shop</a>
+          <a href="seller.html">Sell</a>
+          <a href="admin.html">Admin</a>
           <a href="apply.html">Apply</a>
-          <button class="nav-action" type="button" data-reset-demo>Reset demo</button>
+          <button class="nav-action" type="button" data-reset-demo>Reset</button>
         </div>
       </nav>
 
       <main class="app-layout">
         <section class="app-hero reveal">
           <div>
-            <p class="eyebrow">Buyer marketplace</p>
-            <h1 class="app-title">Find your neighborhood favorite.</h1>
+            <p class="eyebrow">Neighborhood shop</p>
+            <h1 class="app-title">Order from a snack spot you can walk to.</h1>
             <p class="hero-text">
-              Browse nearby candy spots, save the best ones, and place a quick
-              pickup order for approved snacks and cold drinks.
+              This first live shop is Ms. Kiki's Snack Spot. Add in-stock candy,
+              chips, and drinks, then pick up with your code.
             </p>
           </div>
           <div class="hero-actions compact">
-            <a class="primary-button" href="#seller-cards">Browse nearby</a>
+            <a class="primary-button" href="#seller-cards">See the shop</a>
             <a class="secondary-button" href="#cart-preview">View cart</a>
           </div>
         </section>
@@ -61,165 +61,34 @@
 
         <section class="app-section reveal" id="seller-cards">
           <div class="section-heading">
-            <p class="eyebrow">Nearby sellers</p>
-            <h2>Snack spots around the corner</h2>
+            <p class="eyebrow">Open shop</p>
+            <h2>Pickup around the corner</h2>
           </div>
-          <div class="seller-card-grid">
-            <article class="seller-card feature-card">
-              <div class="seller-card-top">
-                <div>
-                  <p class="card-label">Open now</p>
-                  <h3>Ms. Kiki's Snack Spot</h3>
-                </div>
-                <span class="pill-price">4.9</span>
-              </div>
-              <p>Cherry Hill | Pickup in 10 minutes</p>
-              <div class="badge-row">
-                <span>Best seller</span>
-                <span>Cold drinks</span>
-                <span>Approved catalog</span>
-              </div>
-              <div class="quick-items">
-                <div><strong>Gummy mix</strong><span>$2.50</span></div>
-                <div><strong>Nacho chips</strong><span>$1.75</span></div>
-                <div><strong>Orange soda</strong><span>$1.75</span></div>
-              </div>
-            </article>
-
-            <article class="seller-card">
-              <div class="seller-card-top">
-                <div>
-                  <p class="card-label">After school favorite</p>
-                  <h3>Coach T's Candy Corner</h3>
-                </div>
-                <span class="pill-price">4.8</span>
-              </div>
-              <p>Riverside | Pickup in 15 minutes</p>
-              <div class="badge-row">
-                <span>Candy</span>
-                <span>Juices</span>
-                <span>Family pick</span>
-              </div>
-              <div class="quick-items">
-                <div><strong>Fruit chews</strong><span>$1.50</span></div>
-                <div><strong>Cheese puffs</strong><span>$1.25</span></div>
-                <div><strong>Fruit punch</strong><span>$2.00</span></div>
-              </div>
-            </article>
+          <div class="seller-card-grid" data-seller-cards>
+            <p class="empty-state">Loading the neighborhood shop…</p>
           </div>
         </section>
 
         <section class="app-grid reveal">
           <div class="app-panel">
             <div class="section-heading">
-              <p class="eyebrow">Popular picks</p>
-              <h2>What families are grabbing</h2>
+              <p class="eyebrow">In stock now</p>
+              <h2>What you can pick up today</h2>
             </div>
-            <div class="catalog-list" data-product-list>
-              <article
-                class="catalog-row strawberry"
-                data-product-card
-                data-category="candy"
-                data-open="true"
-                data-name="Sour gummy mix"
-                data-price="2.50"
-              >
-                <div>
-                  <p class="card-label">Just stocked</p>
-                  <h3>Sour gummy mix</h3>
-                  <p>Ms. Kiki's Snack Spot</p>
-                </div>
-                <div class="catalog-actions">
-                  <strong>$2.50</strong>
-                  <button class="mini-action" type="button" data-add-to-cart>Add</button>
-                </div>
-              </article>
-              <article
-                class="catalog-row citrus"
-                data-product-card
-                data-category="drinks"
-                data-open="true"
-                data-name="Orange soda bottle"
-                data-price="1.75"
-              >
-                <div>
-                  <p class="card-label">Cold drink</p>
-                  <h3>Orange soda bottle</h3>
-                  <p>Ms. Kiki's Snack Spot</p>
-                </div>
-                <div class="catalog-actions">
-                  <strong>$1.75</strong>
-                  <button class="mini-action" type="button" data-add-to-cart>Add</button>
-                </div>
-              </article>
-              <article
-                class="catalog-row aqua"
-                data-product-card
-                data-category="chips"
-                data-open="true"
-                data-name="Hot chips"
-                data-price="1.50"
-              >
-                <div>
-                  <p class="card-label">Snack aisle</p>
-                  <h3>Hot chips</h3>
-                  <p>Coach T's Candy Corner</p>
-                </div>
-                <div class="catalog-actions">
-                  <strong>$1.50</strong>
-                  <button class="mini-action" type="button" data-add-to-cart>Add</button>
-                </div>
-              </article>
-              <article
-                class="catalog-row strawberry"
-                data-product-card
-                data-category="candy"
-                data-open="false"
-                data-name="Fruit chews"
-                data-price="1.50"
-              >
-                <div>
-                  <p class="card-label">Candy</p>
-                  <h3>Fruit chews</h3>
-                  <p>Coach T's Candy Corner</p>
-                </div>
-                <div class="catalog-actions">
-                  <strong>$1.50</strong>
-                  <button class="mini-action" type="button" data-add-to-cart>Add</button>
-                </div>
-              </article>
-              <article
-                class="catalog-row citrus"
-                data-product-card
-                data-category="drinks"
-                data-open="false"
-                data-name="Fruit punch"
-                data-price="2.00"
-              >
-                <div>
-                  <p class="card-label">Juice drink</p>
-                  <h3>Fruit punch</h3>
-                  <p>Coach T's Candy Corner</p>
-                </div>
-                <div class="catalog-actions">
-                  <strong>$2.00</strong>
-                  <button class="mini-action" type="button" data-add-to-cart>Add</button>
-                </div>
-              </article>
-            </div>
+            <div class="catalog-list" data-product-list></div>
             <p class="empty-state" data-empty-state hidden>No matching snacks found.</p>
           </div>
 
           <aside class="app-panel cart-panel" id="cart-preview">
             <div class="section-heading">
-              <p class="eyebrow">Cart preview</p>
+              <p class="eyebrow">Cart</p>
               <h2>Pickup order</h2>
             </div>
             <div class="cart-lines" data-cart-lines>
               <p class="empty-state">No snacks added yet.</p>
             </div>
             <div class="cart-summary">
-              <div><span>Pickup from</span><strong>Ms. Kiki's Snack Spot</strong></div>
+              <div><span>Pickup from</span><strong data-pickup-from>Ms. Kiki's Snack Spot</strong></div>
               <div><span>Pickup code</span><strong data-pickup-code>Not placed yet</strong></div>
               <div><span>Total</span><strong data-cart-total>$0.00</strong></div>
               <div><span>Payment</span><strong>Pay seller at pickup</strong></div>
