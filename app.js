@@ -52,6 +52,30 @@ document.querySelectorAll("[data-reset-demo]").forEach((button) => {
 const buyerApp = document.querySelector("[data-buyer-app]");
 
 const API_BASE_URL = "https://candy-lady-api.onrender.com";
+const LIVE_SELLER_ID = 1;
+const DEMO_USER_ID = 1;
+const categoryTone = {
+  candy: "strawberry",
+  chips: "aqua",
+  drinks: "citrus",
+};
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&")
+    .replaceAll("<", "<")
+    .replaceAll(">", ">")
+    .replaceAll('"', """);
+
+const readApiError = async (response, fallback) => {
+  try {
+    const payload = await response.json();
+    return payload.error || payload.msg || payload.description || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 const auth = {
   tokenKey: "candyLadyToken",
   getToken() {
@@ -136,7 +160,7 @@ const initAuthGate = (root, onLogin) => {
       showDashboard();
     } catch (error) {
       console.error(error);
-      showLoginForm("Could not log in. Use a seeded email and password.");
+      showLoginForm("Could not log in. Check the email and password.");
     }
   });
 
@@ -163,10 +187,10 @@ if (applicationApp) {
 
   const renderApplicationPreview = (seller) => {
     preview.innerHTML = `
-      <div><span>Status</span><strong>${seller.status}</strong></div>
-      <div><span>Shop</span><strong>${seller.shop_name}</strong></div>
-      <div><span>Neighborhood</span><strong>${seller.neighborhood}</strong></div>
-      <div><span>Pickup window</span><strong>${seller.pickup_window}</strong></div>
+      <div><span>Status</span><strong>${escapeHtml(seller.status)}</strong></div>
+      <div><span>Shop</span><strong>${escapeHtml(seller.shop_name)}</strong></div>
+      <div><span>Neighborhood</span><strong>${escapeHtml(seller.neighborhood)}</strong></div>
+      <div><span>Pickup window</span><strong>${escapeHtml(seller.pickup_window)}</strong></div>
     `;
   };
 
@@ -186,7 +210,7 @@ if (applicationApp) {
           pickup_window: formData.get("pickupWindow").trim(),
         }),
       });
-      if (!response.ok) throw new Error("Unable to submit application");
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to submit application"));
 
       const seller = await response.json();
       renderApplicationPreview(seller);
@@ -194,7 +218,7 @@ if (applicationApp) {
       message.textContent = "Application submitted for admin review.";
     } catch (error) {
       console.error(error);
-      message.textContent = "Could not submit application. Is the backend running?";
+      message.textContent = error.message || "Could not submit application.";
     }
   });
 }
@@ -207,57 +231,118 @@ if (buyerApp) {
   const cartLines = document.querySelector("[data-cart-lines]");
   const cartTotal = document.querySelector("[data-cart-total]");
   const pickupCode = document.querySelector("[data-pickup-code]");
+  const pickupFrom = document.querySelector("[data-pickup-from]");
   const orderMessage = document.querySelector("[data-order-message]");
   const placeOrderButton = document.querySelector("[data-place-order]");
+  const sellerCards = document.querySelector("[data-seller-cards]");
   const cart = new Map(
-    storage.get("candyLadyCart", []).map((item) => [item.id, item])
+    storage.get("candyLadyCart", []).map((item) => [String(item.id), item])
   );
   let activeFilter = "all";
-  let candies = [];
+  let shelfItems = [];
+  let activeSeller = null;
 
   const money = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
   });
 
-  const fetchCandies = async () => {
+  const renderSellerCard = (seller, items) => {
+    if (!sellerCards) return;
+    const preview = items.slice(0, 3);
+    sellerCards.innerHTML = `
+      <article class="seller-card feature-card">
+        <div class="seller-card-top">
+          <div>
+            <p class="card-label">Open now</p>
+            <h3>${escapeHtml(seller.shop_name)}</h3>
+          </div>
+        </div>
+        <p>${escapeHtml(seller.neighborhood)} | ${escapeHtml(seller.pickup_window)}</p>
+        <div class="badge-row">
+          <span>Approved shop</span>
+          <span>Pay at pickup</span>
+        </div>
+        <div class="quick-items">
+          ${
+            preview.length
+              ? preview
+                  .map(
+                    (item) =>
+                      `<div><strong>${escapeHtml(item.candy.name)}</strong><span>${money.format(
+                        item.candy.price_cents / 100
+                      )}</span></div>`
+                  )
+                  .join("")
+              : "<div><strong>No items in stock yet</strong><span></span></div>"
+          }
+        </div>
+      </article>
+    `;
+  };
+
+  const fetchStorefront = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/candies`);
-      if (!response.ok) throw new Error("Failed to fetch candies");
-      candies = await response.json();
+      const response = await fetch(
+        `${API_BASE_URL}/sellers/${LIVE_SELLER_ID}/storefront`
+      );
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Failed to load shop"));
+      }
+      const storefront = await response.json();
+      activeSeller = storefront.seller;
+      shelfItems = storefront.items || [];
+      const inStockIds = new Set(shelfItems.map((item) => String(item.candy.id)));
+      for (const id of [...cart.keys()]) {
+        if (!inStockIds.has(String(id))) cart.delete(id);
+      }
+      renderCart();
+      if (pickupFrom && activeSeller) {
+        pickupFrom.textContent = activeSeller.shop_name;
+      }
+      renderSellerCard(activeSeller, shelfItems);
       renderProductList();
       filterProducts();
     } catch (error) {
-      console.error("Error fetching candies:", error);
-      orderMessage.textContent = "Failed to load candies. Check backend server.";
+      console.error("Error fetching storefront:", error);
+      if (sellerCards) {
+        sellerCards.innerHTML =
+          '<p class="empty-state">Could not load the shop. Try again in a moment.</p>';
+      }
+      if (orderMessage) {
+        orderMessage.textContent = error.message || "Failed to load the shop.";
+      }
     }
   };
 
   const renderProductList = () => {
-    productList.innerHTML = candies
-      .map(
-        (candy) => `
+    productList.innerHTML = shelfItems
+      .map((item) => {
+        const candy = item.candy;
+        const category = candy.category || "candy";
+        const tone = categoryTone[category] || "strawberry";
+        return `
           <article
-            class="catalog-row strawberry"
+            class="catalog-row ${tone}"
             data-product-card
-            data-category="candy"
+            data-category="${escapeHtml(category)}"
             data-open="true"
-            data-name="${candy.name}"
+            data-name="${escapeHtml(candy.name)}"
             data-price="${(candy.price_cents / 100).toFixed(2)}"
             data-candy-id="${candy.id}"
           >
             <div>
-              <p class="card-label">Available</p>
-              <h3>${candy.name}</h3>
-              <p>${candy.description || 'Stocked item'}</p>
+              <p class="card-label">${escapeHtml(category)}</p>
+              <h3>${escapeHtml(candy.name)}</h3>
+              <p>${escapeHtml(activeSeller?.shop_name || candy.description || "Stocked item")}</p>
             </div>
             <div class="catalog-actions">
               <strong>${money.format(candy.price_cents / 100)}</strong>
               <button class="mini-action" type="button" data-add-to-cart>Add</button>
             </div>
           </article>
-        `
-      )
+        `;
+      })
       .join("");
   };
 
@@ -278,12 +363,12 @@ if (buyerApp) {
         (item) => `
           <article class="cart-item" data-cart-item="${item.id}">
             <div class="cart-item-main">
-              <strong>${item.name}</strong>
+              <strong>${escapeHtml(item.name)}</strong>
               <span>${money.format(item.price * item.qty)}</span>
             </div>
             <div class="cart-item-controls">
               <span>${money.format(item.price)} each</span>
-              <div class="qty-controls" aria-label="${item.name} quantity">
+              <div class="qty-controls" aria-label="${escapeHtml(item.name)} quantity">
                 <button class="qty-button" type="button" data-cart-minus="${item.id}">-</button>
                 <strong>${item.qty}</strong>
                 <button class="qty-button" type="button" data-cart-plus="${item.id}">+</button>
@@ -320,6 +405,10 @@ if (buyerApp) {
     });
 
     emptyState.hidden = visibleCount !== 0;
+    if (!shelfItems.length) {
+      emptyState.hidden = false;
+      emptyState.textContent = "Nothing in stock right now.";
+    }
   };
 
   filterButtons.forEach((button) => {
@@ -383,7 +472,7 @@ if (buyerApp) {
     }
 
     const items = [...cart.values()].map((item) => ({
-      candy_id: parseInt(item.id),
+      candy_id: parseInt(item.id, 10),
       quantity: item.qty,
     }));
 
@@ -391,9 +480,15 @@ if (buyerApp) {
       const response = await fetch(`${API_BASE_URL}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: 1, seller_id: 1, items }),
+        body: JSON.stringify({
+          user_id: DEMO_USER_ID,
+          seller_id: LIVE_SELLER_ID,
+          items,
+        }),
       });
-      if (!response.ok) throw new Error("Failed to place order");
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Failed to place order"));
+      }
       const order = await response.json();
       const code = `CL-${order.id}`;
 
@@ -402,13 +497,14 @@ if (buyerApp) {
       orderMessage.textContent = `Pickup order placed. Show code ${code} at pickup.`;
       cart.clear();
       renderCart();
+      fetchStorefront();
     } catch (error) {
       console.error("Error placing order:", error);
-      orderMessage.textContent = "Failed to place order. Try again.";
+      orderMessage.textContent = error.message || "Failed to place order. Try again.";
     }
   });
 
-  fetchCandies();
+  fetchStorefront();
   renderCart();
   renderPickupCode();
 }
@@ -420,7 +516,11 @@ if (sellerApp) {
   const activeOrderCount = document.querySelector("[data-seller-order-count]");
   const inventoryGrid = document.querySelector(".inventory-grid");
   const orderList = document.querySelector(".order-list");
-  const sellerId = 1;
+  const shopName = document.querySelector("[data-shop-name]");
+  const shopNeighborhood = document.querySelector("[data-shop-neighborhood]");
+  const shopHours = document.querySelector("[data-shop-hours]");
+  const shopStatus = document.querySelector("[data-shop-status]");
+  const sellerId = LIVE_SELLER_ID;
 
   const orderButtons = {
     new: "Start packing",
@@ -434,42 +534,75 @@ if (sellerApp) {
     ready: "ready",
   };
 
-  const titleCase = (value) => value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const titleCase = (value) =>
+    String(value || "").replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+  const renderShopProfile = (seller) => {
+    if (!seller) return;
+    if (shopName) shopName.textContent = seller.shop_name;
+    if (shopNeighborhood) shopNeighborhood.textContent = seller.neighborhood;
+    if (shopHours) shopHours.textContent = seller.pickup_window;
+    if (shopStatus) shopStatus.textContent = titleCase(seller.status);
+  };
 
   const renderInventory = (inventory) => {
-    inventoryGrid.innerHTML = inventory.map((item) => `
-      <article class="inventory-card strawberry" data-inventory-card data-candy-id="${item.candy_id}" data-stock-status="${item.status}">
-        <div><p class="card-label">Catalog item</p><h3>${item.candy.name}</h3></div>
+    inventoryGrid.innerHTML =
+      inventory
+        .map((item) => {
+          const category = item.candy?.category || "candy";
+          const tone = categoryTone[category] || "strawberry";
+          return `
+      <article class="inventory-card ${tone}" data-inventory-card data-candy-id="${item.candy_id}" data-stock-status="${item.status}" data-inventory-count="${item.inventory_count}">
+        <div><p class="card-label">${escapeHtml(category)}</p><h3>${escapeHtml(item.candy.name)}</h3></div>
         <div class="inventory-meta">
           <span>$${(item.candy.price_cents / 100).toFixed(2)} · ${item.inventory_count} left</span>
           <strong data-stock-label>${titleCase(item.status)}</strong>
           <button class="mini-action" type="button" data-toggle-stock>${item.status === "out-of-stock" ? "Mark in stock" : "Mark out"}</button>
         </div>
-      </article>`).join("") || '<p class="empty-state">No inventory assigned yet.</p>';
+      </article>`;
+        })
+        .join("") || '<p class="empty-state">No inventory assigned yet.</p>';
     inStockCount.textContent = inventory.filter((item) => item.status !== "out-of-stock").length;
   };
 
   const renderOrders = (orders) => {
-    orderList.innerHTML = orders.map((order) => `
+    orderList.innerHTML =
+      orders
+        .map(
+          (order) => `
       <article class="order-row" data-order-row data-order-id="${order.id}">
         <div><strong>Order #${order.id}</strong><p>${order.items.map((item) => `${item.quantity} ${item.candy.name}`).join(", ")}</p></div>
-        <div class="row-actions"><span class="status-pill ${orderClasses[order.status]}" data-order-status>${titleCase(order.status)}</span>${order.status === "ready" || order.status === "new" || order.status === "packing" ? `<button class="mini-action" type="button" data-next-order-status>${orderButtons[order.status]}</button>` : ""}</div>
-      </article>`).join("") || '<p class="empty-state">No active pickup orders.</p>';
+        <div class="row-actions"><span class="status-pill ${orderClasses[order.status]}" data-order-status>${titleCase(order.status)}</span>${
+            order.status === "ready" || order.status === "new" || order.status === "packing"
+              ? `<button class="mini-action" type="button" data-next-order-status>${orderButtons[order.status]}</button>`
+              : ""
+          }</div>
+      </article>`
+        )
+        .join("") || '<p class="empty-state">No active pickup orders.</p>';
     activeOrderCount.textContent = orders.length;
   };
 
   const loadSellerDashboard = async () => {
     try {
-      const [inventoryResponse, ordersResponse] = await Promise.all([
+      const [inventoryResponse, ordersResponse, storefrontResponse] = await Promise.all([
         authFetch(`${API_BASE_URL}/sellers/${sellerId}/inventory`),
         authFetch(`${API_BASE_URL}/sellers/${sellerId}/orders`),
+        fetch(`${API_BASE_URL}/sellers/${sellerId}/storefront`),
       ]);
-      if (!inventoryResponse.ok || !ordersResponse.ok) throw new Error("Unable to load seller dashboard");
+      if (!inventoryResponse.ok || !ordersResponse.ok) {
+        throw new Error("Unable to load seller dashboard");
+      }
       renderInventory(await inventoryResponse.json());
       renderOrders(await ordersResponse.json());
+      if (storefrontResponse.ok) {
+        const storefront = await storefrontResponse.json();
+        renderShopProfile(storefront.seller);
+      }
     } catch (error) {
       console.error(error);
-      orderList.innerHTML = '<p class="empty-state">Could not load seller data. Is the backend running?</p>';
+      orderList.innerHTML =
+        '<p class="empty-state">Could not load seller data. Log in again if your session expired.</p>';
     }
   };
 
@@ -479,10 +612,21 @@ if (sellerApp) {
     try {
       if (stockButton) {
         const card = stockButton.closest("[data-inventory-card]");
-        const status = card.dataset.stockStatus === "out-of-stock" ? "in-stock" : "out-of-stock";
-        const response = await authFetch(`${API_BASE_URL}/sellers/${sellerId}/inventory/${card.dataset.candyId}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-        });
+        const currentlyOut = card.dataset.stockStatus === "out-of-stock";
+        const payload = currentlyOut
+          ? {
+              status: "in-stock",
+              inventory_count: Math.max(8, Number(card.dataset.inventoryCount) || 0),
+            }
+          : { status: "out-of-stock" };
+        const response = await authFetch(
+          `${API_BASE_URL}/sellers/${sellerId}/inventory/${card.dataset.candyId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
         if (!response.ok) throw new Error("Unable to update inventory");
         loadSellerDashboard();
       }
@@ -491,7 +635,9 @@ if (sellerApp) {
         const current = row.querySelector("[data-order-status]").textContent.trim().toLowerCase();
         const status = { new: "packing", packing: "ready", ready: "completed" }[current];
         const response = await authFetch(`${API_BASE_URL}/orders/${row.dataset.orderId}/status`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
         });
         if (!response.ok) throw new Error("Unable to update order");
         loadSellerDashboard();
@@ -509,7 +655,12 @@ const adminApp = document.querySelector("[data-admin-app]");
 if (adminApp) {
   const activeSellerCount = document.querySelector("[data-active-seller-count]");
   const pendingReviewCount = document.querySelector("[data-pending-review-count]");
+  const approvedItemCount = document.querySelector("[data-approved-item-count]");
   const submittedApplicationList = adminApp.querySelector(".approval-list");
+  const catalogGrid = adminApp.querySelector("[data-admin-catalog]");
+  const candyCount = document.querySelector("[data-count-candy]");
+  const chipsCount = document.querySelector("[data-count-chips]");
+  const drinksCount = document.querySelector("[data-count-drinks]");
 
   const approvalClasses = {
     pending: "waiting",
@@ -523,6 +674,30 @@ if (adminApp) {
     rejected: "Rejected",
   };
 
+  const renderCatalog = (candies) => {
+    if (approvedItemCount) approvedItemCount.textContent = candies.length;
+    const counts = { candy: 0, chips: 0, drinks: 0 };
+    candies.forEach((candy) => {
+      counts[candy.category || "candy"] += 1;
+    });
+    if (candyCount) candyCount.textContent = `${counts.candy} items`;
+    if (chipsCount) chipsCount.textContent = `${counts.chips} items`;
+    if (drinksCount) drinksCount.textContent = `${counts.drinks} items`;
+    if (!catalogGrid) return;
+    catalogGrid.innerHTML = candies
+      .map((candy) => {
+        const category = candy.category || "candy";
+        const tone = categoryTone[category] || "strawberry";
+        return `
+          <article class="catalog-admin-card ${tone}">
+            <p class="card-label">${escapeHtml(category)}</p>
+            <h3>${escapeHtml(candy.name)}</h3>
+            <p>${escapeHtml(candy.description || "Approved catalog item")}</p>
+          </article>`;
+      })
+      .join("");
+  };
+
   const renderApplications = (applications) => {
     pendingReviewCount.textContent = applications.length;
     if (!applications.length) {
@@ -532,34 +707,43 @@ if (adminApp) {
     }
 
     submittedApplicationList.innerHTML = applications
-      .map((seller) => `
+      .map(
+        (seller) => `
           <article class="approval-row" data-seller-id="${seller.id}">
             <div>
-              <strong>${seller.shop_name}</strong>
-              <p>${seller.neighborhood} | ${seller.pickup_window}</p>
-              <p>Contact: ${seller.contact_name}</p>
+              <strong>${escapeHtml(seller.shop_name)}</strong>
+              <p>${escapeHtml(seller.neighborhood)} | ${escapeHtml(seller.pickup_window)}</p>
+              <p>Contact: ${escapeHtml(seller.contact_name)}</p>
             </div>
             <div class="approval-actions">
               <span class="status-pill ${approvalClasses[seller.status]}">${approvalLabels[seller.status]}</span>
               <button class="mini-action" type="button" data-approve-seller>Approve</button>
               <button class="soft-action" type="button" data-reject-seller>Reject</button>
             </div>
-          </article>`)
+          </article>`
+      )
       .join("");
   };
 
   const loadPendingApplications = async () => {
     try {
-      const [pendingResponse, approvedResponse] = await Promise.all([
+      const [pendingResponse, approvedResponse, candiesResponse] = await Promise.all([
         authFetch(`${API_BASE_URL}/applications?status=pending`),
         authFetch(`${API_BASE_URL}/applications?status=approved`),
+        fetch(`${API_BASE_URL}/candies`),
       ]);
-      if (!pendingResponse.ok || !approvedResponse.ok) throw new Error("Unable to load applications");
+      if (!pendingResponse.ok || !approvedResponse.ok) {
+        throw new Error("Unable to load applications");
+      }
       activeSellerCount.textContent = (await approvedResponse.json()).length;
       renderApplications(await pendingResponse.json());
+      if (candiesResponse.ok) {
+        renderCatalog(await candiesResponse.json());
+      }
     } catch (error) {
       console.error(error);
-      submittedApplicationList.innerHTML = '<p class="empty-state">Could not load applications. Is the backend running?</p>';
+      submittedApplicationList.innerHTML =
+        '<p class="empty-state">Could not load applications. Log in again if your session expired.</p>';
     }
   };
 

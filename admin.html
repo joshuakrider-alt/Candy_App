@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>The Candy Lady | Admin Demo</title>
+    <title>The Candy Lady | Admin</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,12 +17,12 @@
       <nav class="topbar app-topbar">
         <a class="brand-pill" href="index.html">The Candy Lady</a>
         <div class="topbar-links">
-          <a href="buyer.html">Buyer demo</a>
-          <a href="seller.html">Seller demo</a>
-          <a class="active-link" href="admin.html">Admin demo</a>
+          <a href="buyer.html">Shop</a>
+          <a href="seller.html">Sell</a>
+          <a class="active-link" href="admin.html">Admin</a>
           <a href="apply.html">Apply</a>
           <button class="nav-action" type="button" data-logout hidden>Log out</button>
-          <button class="nav-action" type="button" data-reset-demo>Reset demo</button>
+          <button class="nav-action" type="button" data-reset-demo>Reset</button>
         </div>
       </nav>
 
@@ -30,7 +30,7 @@
         <div class="section-heading">
           <p class="eyebrow">Admin login</p>
           <h1 class="app-title">Sign in to review sellers.</h1>
-          <p class="hero-text">Use a seeded buyer email for this prototype.</p>
+          <p class="hero-text">Use a seeded account email for this prototype.</p>
         </div>
         <form class="application-form" data-login-form>
           <label class="form-field">
@@ -52,14 +52,13 @@
             <p class="eyebrow">Platform controls</p>
             <h1 class="app-title">Keep sellers and snacks on brand.</h1>
             <p class="hero-text">
-              The admin side controls seller approvals, the approved product
-              catalog, and the consistency that makes the platform trustworthy.
+              Approve neighborhood shops and keep the catalog consistent.
             </p>
           </div>
           <div class="stats-row">
-            <div class="stat-chip"><strong data-active-seller-count>126</strong><span>Active sellers</span></div>
-            <div class="stat-chip"><strong>84</strong><span>Approved items</span></div>
-            <div class="stat-chip"><strong data-pending-review-count>2</strong><span>Pending reviews</span></div>
+            <div class="stat-chip"><strong data-active-seller-count>0</strong><span>Active sellers</span></div>
+            <div class="stat-chip"><strong data-approved-item-count>0</strong><span>Catalog items</span></div>
+            <div class="stat-chip"><strong data-pending-review-count>0</strong><span>Pending reviews</span></div>
           </div>
         </section>
 
@@ -80,10 +79,9 @@
               <h2>Category balance</h2>
             </div>
             <div class="profile-stack">
-              <div><span>Candy</span><strong>31 items</strong></div>
-              <div><span>Chips</span><strong>22 items</strong></div>
-              <div><span>Drinks</span><strong>25 items</strong></div>
-              <div><span>Seasonal</span><strong>6 items</strong></div>
+              <div><span>Candy</span><strong data-count-candy>0 items</strong></div>
+              <div><span>Chips</span><strong data-count-chips>0 items</strong></div>
+              <div><span>Drinks</span><strong data-count-drinks>0 items</strong></div>
             </div>
           </aside>
         </section>
@@ -91,24 +89,10 @@
         <section class="app-section reveal">
           <div class="section-heading">
             <p class="eyebrow">Approved inventory</p>
-            <h2>Product catalog preview</h2>
+            <h2>Product catalog</h2>
           </div>
-          <div class="catalog-admin-grid">
-            <article class="catalog-admin-card strawberry">
-              <p class="card-label">Candy</p>
-              <h3>Sour gummy mix</h3>
-              <p>Approved for all standard sellers</p>
-            </article>
-            <article class="catalog-admin-card citrus">
-              <p class="card-label">Drinks</p>
-              <h3>Orange soda bottle</h3>
-              <p>Price band locked between $1.50 and $2.00</p>
-            </article>
-            <article class="catalog-admin-card aqua">
-              <p class="card-label">Snacks</p>
-              <h3>Hot chips</h3>
-              <p>High-demand item, featured in after-school category</p>
-            </article>
+          <div class="catalog-admin-grid" data-admin-catalog>
+            <p class="empty-state">Loading catalog…</p>
           </div>
         </section>
       </main>
