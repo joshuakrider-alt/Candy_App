@@ -1,41 +1,39 @@
-# Candy Lady API
+Quick backend for Candy_App (Flask + SQLAlchemy)
 
-Flask + SQLAlchemy backend for The Candy Lady.
+By default, the API uses a local SQLite database at `backend/data.db`.
+If `DATABASE_URL` is set, Flask-SQLAlchemy uses that database instead.
 
-By default the API uses SQLite at `backend/data.db`.
-If `DATABASE_URL` is set, Flask-SQLAlchemy uses that database instead (Postgres on Render).
-
-## Local setup
-
+Setup with local SQLite:
 1. `cd backend`
 2. `python -m venv .venv`
-3. Activate the virtual environment
+3. Activate the virtual environment:
+   - Windows: `.\.venv\Scripts\activate`
+   - macOS/Linux: `source .venv/bin/activate`
 4. `pip install -r requirements.txt`
 5. `python seed.py`
 6. `python app.py`
 
-## Render env vars
+Setup with another database, such as Postgres:
+1. Create the database.
+2. Set `DATABASE_URL`, for example:
+   - macOS/Linux: `export DATABASE_URL="postgresql://localhost/candy_app"`
+   - Windows PowerShell: `$env:DATABASE_URL="postgresql://localhost/candy_app"`
+3. Run `python seed.py`.
+4. Run `python app.py`.
 
-- `DATABASE_URL` — Postgres URL
-- `JWT_SECRET_KEY` — required in production
-- `CORS_ORIGINS` — `https://www.neighborhoodcandylady.com,https://neighborhoodcandylady.com`
-- `PROTOTYPE_LOGIN_PASSWORD` — shared prototype password
+Authentication:
+- `POST /login` accepts `email` and `password`.
+- For this prototype, any seeded user can log in with the shared password `password`.
+- Seller/admin routes require `Authorization: Bearer <access_token>`.
+- User/order reads and candy writes (POST/PUT/DELETE) now need a Bearer token.
 
-## Auth
-
-- `POST /login` with `{ "email", "password" }`
-- Seeded users share the prototype password
-- User/order reads and candy writes need `Authorization: Bearer <token>`
-- Seller inventory, seller orders, application list/approve, and order status need a token
-- Public: `GET /candies`, `GET /candies/<id>`, `GET /sellers/<id>/storefront`, `POST /applications`, `POST /login`, `POST /orders`
-
-## Useful endpoints
-
-- `GET /sellers/<id>/storefront` — approved seller + in-stock items (buyer shelf)
+Available endpoints (examples):
+- `GET /candies`
+- `POST /applications`
 - `GET /applications?status=pending`
 - `PUT /applications/<seller_id>`
-- `GET /sellers/<id>/inventory`
-- `PUT /sellers/<id>/inventory/<candy_id>`
-- `GET /sellers/<id>/orders`
+- `GET /sellers/<seller_id>/inventory`
+- `PUT /sellers/<seller_id>/inventory/<candy_id>`
+- `GET /sellers/<seller_id>/orders`
 - `POST /orders`
-- `PUT /orders/<id>/status`
+- `PUT /orders/<order_id>/status`

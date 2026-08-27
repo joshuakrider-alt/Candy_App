@@ -1,33 +1,20 @@
 # The Candy Lady
 
-Neighborhood snack marketplace at [neighborhoodcandylady.com](https://www.neighborhoodcandylady.com).
+A clickable candy reseller platform prototype for a neighborhood snack marketplace where approved sellers can offer approved candy, chips, and drinks for local pickup.
 
-Approved sellers offer an approved catalog of candy, chips, and drinks for local pickup. Pay the seller when you collect.
+## Prototype Pages
 
-## Live
+- `index.html` - brand and concept page
+- `buyer.html` - buyer marketplace, filters, and cart
+- `seller.html` - seller orders and inventory controls
+- `admin.html` - seller approval and catalog management concept
 
-- Site: https://www.neighborhoodcandylady.com
-- API: https://candy-lady-api.onrender.com
+## Run Locally
 
-## Pages
+Open `index.html` in a browser, or run:
 
-- `index.html` — brand and how it works
-- `buyer.html` — shop Ms. Kiki's in-stock items and place a pickup order
-- `seller.html` — inventory toggles and pickup queue (login required)
-- `admin.html` — seller approval (login required)
-- `apply.html` — seller application
+```powershell
+start index.html
+```
 
-## What works today
-
-- Browse Ms. Kiki's in-stock catalog, filter by candy / chips / drinks
-- Place a pickup order (pay at pickup)
-- Seller login, stock toggles, order status
-- Admin login and approve / reject applications
-
-## Local frontend
-
-Open `index.html` in a browser. `app.js` talks to the live API unless you change `API_BASE_URL`.
-
-## Local backend
-
-See `backend/README.md`.
+The prototype uses browser `localStorage` for demo persistence. It does not include a backend, accounts, or real payments yet.

@@ -8,7 +8,6 @@ from flask_jwt_extended import (
     jwt_required,
     verify_jwt_in_request,
 )
-from werkzeug.exceptions import HTTPException
 
 from models import Candy, Order, OrderItem, Seller, SellerInventory, User, db
 
@@ -44,10 +43,6 @@ def create_app():
 
     with app.app_context():
         db.create_all()
-
-    @app.errorhandler(HTTPException)
-    def handle_http_exception(error):
-        return jsonify(error=error.description), error.code
 
     # Prototype authentication. Any seeded user can log in with the shared password.
     @app.route("/login", methods=["POST"])
@@ -119,7 +114,6 @@ def create_app():
         return jsonify([user.to_dict() for user in User.query.all()])
 
     @app.route("/users/<int:user_id>", methods=["GET"])
-    @jwt_required()
     def get_user(user_id):
         return jsonify(User.query.get_or_404(user_id).to_dict())
 
@@ -177,25 +171,6 @@ def create_app():
         db.session.commit()
         return jsonify(seller.to_dict())
 
-    # Public storefront for buyers: approved seller + in-stock items only
-    @app.route("/sellers/<int:seller_id>/storefront", methods=["GET"])
-    def get_seller_storefront(seller_id):
-        seller = Seller.query.get_or_404(seller_id)
-        if seller.status != "approved":
-            abort(404, description="seller is not available")
-
-        inventory = SellerInventory.query.filter(
-            SellerInventory.seller_id == seller_id,
-            SellerInventory.inventory_count > 0,
-            SellerInventory.status.in_(("in-stock", "low-stock")),
-        ).all()
-        return jsonify(
-            {
-                "seller": seller.to_dict(),
-                "items": [item.to_dict() for item in inventory],
-            }
-        )
-
     # Seller inventory
     @app.route("/sellers/<int:seller_id>/inventory", methods=["GET"])
     @jwt_required()
@@ -228,8 +203,6 @@ def create_app():
             if data["status"] not in INVENTORY_STATUSES:
                 abort(400, description="invalid inventory status")
             inventory.status = data["status"]
-            if inventory.status == "out-of-stock":
-                inventory.inventory_count = 0
 
         db.session.commit()
         return jsonify(inventory.to_dict())
@@ -290,7 +263,7 @@ def create_app():
                 seller_id=seller_id, candy_id=candy_id
             ).first()
             if not inventory or inventory.inventory_count < quantity:
-                abort(400, description=f"insufficient inventory for {candy.name}")
+                abort(400, description=f"insufficient inventory for candy {candy_id}")
 
             order_item = OrderItem(
                 order=order,
@@ -302,8 +275,6 @@ def create_app():
             inventory.inventory_count -= quantity
             if inventory.inventory_count == 0:
                 inventory.status = "out-of-stock"
-            elif inventory.inventory_count <= 4:
-                inventory.status = "low-stock"
             total += candy.price_cents * quantity
 
         order.total_cents = total

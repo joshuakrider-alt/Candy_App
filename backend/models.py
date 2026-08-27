@@ -7,15 +7,6 @@ from flask_sqlalchemy import SQLAlchemy
 db = SQLAlchemy()
 
 
-def category_for_name(name):
-    text = (name or "").lower()
-    if any(word in text for word in ("chip", "puff", "nacho", "cheeto", "pretzel")):
-        return "chips"
-    if any(word in text for word in ("soda", "punch", "juice", "drink", "cola", "ade")):
-        return "drinks"
-    return "candy"
-
-
 class User(db.Model):
     __tablename__ = "user"
 
@@ -87,7 +78,6 @@ class Candy(db.Model):
             "name": self.name,
             "description": self.description,
             "price_cents": self.price_cents,
-            "category": category_for_name(self.name),
         }
 
 

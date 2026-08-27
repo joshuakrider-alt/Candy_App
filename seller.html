@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>The Candy Lady | Seller</title>
+    <title>The Candy Lady | Seller Demo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,12 +17,12 @@
       <nav class="topbar app-topbar">
         <a class="brand-pill" href="index.html">The Candy Lady</a>
         <div class="topbar-links">
-          <a href="buyer.html">Shop</a>
-          <a class="active-link" href="seller.html">Sell</a>
-          <a href="admin.html">Admin</a>
+          <a href="buyer.html">Buyer demo</a>
+          <a class="active-link" href="seller.html">Seller demo</a>
+          <a href="admin.html">Admin demo</a>
           <a href="apply.html">Apply</a>
           <button class="nav-action" type="button" data-logout hidden>Log out</button>
-          <button class="nav-action" type="button" data-reset-demo>Reset</button>
+          <button class="nav-action" type="button" data-reset-demo>Reset demo</button>
         </div>
       </nav>
 
@@ -30,7 +30,7 @@
         <div class="section-heading">
           <p class="eyebrow">Seller login</p>
           <h1 class="app-title">Sign in to manage your snack spot.</h1>
-          <p class="hero-text">Use a seeded account email for this prototype.</p>
+          <p class="hero-text">Use a seeded buyer email for this prototype.</p>
         </div>
         <form class="application-form" data-login-form>
           <label class="form-field">
@@ -52,13 +52,14 @@
             <p class="eyebrow">Seller dashboard</p>
             <h1 class="app-title">Run your snack spot with a few taps.</h1>
             <p class="hero-text">
-              Toggle stock from the approved catalog and move pickup orders
-              from new to packing to ready.
+              Approved sellers pick from the platform catalog, toggle stock, and
+              manage pickup orders without needing a complicated system.
             </p>
           </div>
           <div class="stats-row">
-            <div class="stat-chip"><strong data-seller-order-count>0</strong><span>Active orders</span></div>
-            <div class="stat-chip"><strong data-in-stock-count>0</strong><span>Items in stock</span></div>
+            <div class="stat-chip"><strong data-seller-order-count>3</strong><span>Active orders</span></div>
+            <div class="stat-chip"><strong data-in-stock-count>2</strong><span>Items in stock</span></div>
+            <div class="stat-chip"><strong>4.9</strong><span>Seller rating</span></div>
           </div>
         </section>
 
@@ -69,20 +70,49 @@
               <h2>Pickup queue</h2>
             </div>
             <div class="order-list">
-              <p class="empty-state">Loading orders…</p>
+              <article class="order-row" data-order-row data-order-id="1082">
+                <div>
+                  <strong>Order #1082</strong>
+                  <p>2 gummy mixes, 1 orange soda</p>
+                </div>
+                <div class="row-actions">
+                  <span class="status-pill ready" data-order-status>Ready</span>
+                  <button class="mini-action" type="button" data-next-order-status>Complete</button>
+                </div>
+              </article>
+              <article class="order-row" data-order-row data-order-id="1084">
+                <div>
+                  <strong>Order #1084</strong>
+                  <p>1 hot chips, 1 fruit punch</p>
+                </div>
+                <div class="row-actions">
+                  <span class="status-pill prepping" data-order-status>Packing</span>
+                  <button class="mini-action" type="button" data-next-order-status>Mark ready</button>
+                </div>
+              </article>
+              <article class="order-row" data-order-row data-order-id="1088">
+                <div>
+                  <strong>Order #1088</strong>
+                  <p>3 candy bars, 2 sodas</p>
+                </div>
+                <div class="row-actions">
+                  <span class="status-pill waiting" data-order-status>New</span>
+                  <button class="mini-action" type="button" data-next-order-status>Start packing</button>
+                </div>
+              </article>
             </div>
           </div>
 
           <aside class="app-panel">
             <div class="section-heading">
               <p class="eyebrow">Shop profile</p>
-              <h2 data-shop-name>Your snack spot</h2>
+              <h2>Ms. Kiki's Snack Spot</h2>
             </div>
             <div class="profile-stack">
-              <div><span>Neighborhood</span><strong data-shop-neighborhood>—</strong></div>
-              <div><span>Hours</span><strong data-shop-hours>—</strong></div>
-              <div><span>Status</span><strong data-shop-status>—</strong></div>
-              <div><span>Payment</span><strong>Pay at pickup</strong></div>
+              <div><span>Neighborhood</span><strong>Cherry Hill</strong></div>
+              <div><span>Hours</span><strong>2:30 PM - 7:00 PM</strong></div>
+              <div><span>Pickup note</span><strong>Use side porch bell</strong></div>
+              <div><span>Payment</span><strong>Cash, Cash App, card reader</strong></div>
             </div>
           </aside>
         </section>
@@ -93,7 +123,39 @@
             <h2>Approved catalog items</h2>
           </div>
           <div class="inventory-grid">
-            <p class="empty-state">Loading inventory…</p>
+            <article class="inventory-card strawberry" data-inventory-card data-stock-id="sour-gummy-mix" data-stock-status="in">
+              <div>
+                <p class="card-label">Candy</p>
+                <h3>Sour gummy mix</h3>
+              </div>
+              <div class="inventory-meta">
+                <span>$2.50</span>
+                <strong data-stock-label>In stock</strong>
+                <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+              </div>
+            </article>
+            <article class="inventory-card citrus" data-inventory-card data-stock-id="orange-soda-bottle" data-stock-status="low">
+              <div>
+                <p class="card-label">Drinks</p>
+                <h3>Orange soda bottle</h3>
+              </div>
+              <div class="inventory-meta">
+                <span>$1.75</span>
+                <strong data-stock-label>Low stock</strong>
+                <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+              </div>
+            </article>
+            <article class="inventory-card aqua" data-inventory-card data-stock-id="hot-chips" data-stock-status="in">
+              <div>
+                <p class="card-label">Snacks</p>
+                <h3>Hot chips</h3>
+              </div>
+              <div class="inventory-meta">
+                <span>$1.50</span>
+                <strong data-stock-label>In stock</strong>
+                <button class="mini-action" type="button" data-toggle-stock>Mark out</button>
+              </div>
+            </article>
           </div>
         </section>
       </main>
