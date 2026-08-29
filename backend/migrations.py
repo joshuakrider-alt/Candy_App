@@ -10,9 +10,11 @@ import logging
 
 from sqlalchemy import inspect, text
 
-from models import db
+from models import ROLES, db
 
 logger = logging.getLogger(__name__)
+
+USER_ROLE_CONSTRAINT = "ck_user_role"
 
 # (table, column, DDL type + default). Defaults must be constants so that
 # SQLite accepts them in ALTER TABLE ... ADD COLUMN.
@@ -56,7 +58,49 @@ def run_migrations():
         logger.info("migration: added %s.%s", table, column)
 
     _backfill(existing_tables, added)
+    _ensure_user_role_check_constraint(existing_tables)
     return added
+
+
+def _ensure_user_role_check_constraint(existing_tables):
+    """Add ck_user_role to a `user` table that was created without it.
+
+    `db.create_all()` only attaches check constraints to tables it creates, so
+    the Neon `user` table predates the constraint and would never get one.
+    SQLite cannot add a constraint to an existing table, so this is a no-op
+    there; the model definition already covers freshly created databases.
+    """
+    if db.engine.dialect.name != "postgresql" or "user" not in existing_tables:
+        return False
+
+    allowed = ", ".join(f"'{role}'" for role in ROLES)
+    try:
+        with db.engine.begin() as connection:
+            already_applied = connection.execute(
+                text(
+                    "SELECT 1 FROM pg_constraint constraint_row "
+                    "JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid "
+                    "WHERE constraint_row.conname = :name AND table_row.relname = 'user'"
+                ),
+                {"name": USER_ROLE_CONSTRAINT},
+            ).first()
+            if already_applied:
+                return False
+            connection.execute(
+                text(
+                    f"ALTER TABLE {_quote('user')} "
+                    f"ADD CONSTRAINT {_quote(USER_ROLE_CONSTRAINT)} "
+                    f"CHECK (role IN ({allowed}))"
+                )
+            )
+    except Exception:  # pragma: no cover - depends on existing rows and grants
+        # A row with an unexpected role would fail the ALTER. Log it instead of
+        # blocking boot; every write path already validates the role.
+        logger.warning("migration: could not add %s", USER_ROLE_CONSTRAINT, exc_info=True)
+        return False
+
+    logger.info("migration: added %s", USER_ROLE_CONSTRAINT)
+    return True
 
 
 def _backfill(existing_tables, added):
