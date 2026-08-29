@@ -67,6 +67,23 @@ def resolve_database_url():
     return database_url
 
 
+def seller_inventory_lock_query(seller_id, candy_ids):
+    """Query one seller's rows for a cart, holding a write lock on each.
+
+    The rows are locked in ascending candy_id order so two carts that share
+    items cannot grab the same pair in opposite orders and deadlock. On SQLite
+    `with_for_update()` renders nothing, because it has no row-level locks.
+    """
+    return (
+        SellerInventory.query.filter(
+            SellerInventory.seller_id == seller_id,
+            SellerInventory.candy_id.in_(sorted(candy_ids)),
+        )
+        .order_by(SellerInventory.candy_id.asc())
+        .with_for_update()
+    )
+
+
 def create_app(config_overrides=None):
     app = Flask(__name__)
     app.config["SQLALCHEMY_DATABASE_URI"] = resolve_database_url()
@@ -689,6 +706,30 @@ def register_routes(app):
         # Fail before touching stock if payments are not wired up.
         payments.require_stripe()
 
+        # A cart can list the same candy on more than one line. Total them up
+        # first so the stock check sees the real demand for each item instead
+        # of judging every line on its own.
+        requested = {}
+        for item in items:
+            candy_id = item.get("candy_id")
+            if not candy_id:
+                abort(400, description="each order item requires candy_id")
+            try:
+                candy_id = int(candy_id)
+            except (TypeError, ValueError):
+                abort(400, description="each order item requires candy_id")
+            quantity = int(item.get("quantity", 1))
+            if quantity <= 0:
+                abort(400, description="quantity must be positive")
+            requested[candy_id] = requested.get(candy_id, 0) + quantity
+
+        # Lock every row this cart draws from before reading any count, so a
+        # second checkout cannot read the same stock and sell it twice.
+        locked = {
+            inventory.candy_id: inventory
+            for inventory in seller_inventory_lock_query(seller.id, requested.keys()).all()
+        }
+
         order = Order(
             user_id=user.id,
             seller_id=seller.id,
@@ -701,18 +742,9 @@ def register_routes(app):
         db.session.add(order)
 
         subtotal = 0
-        for item in items:
-            candy_id = item.get("candy_id")
-            if not candy_id:
-                abort(400, description="each order item requires candy_id")
-            quantity = int(item.get("quantity", 1))
-            if quantity <= 0:
-                abort(400, description="quantity must be positive")
-
+        for candy_id, quantity in sorted(requested.items()):
             candy = Candy.query.get_or_404(candy_id)
-            inventory = SellerInventory.query.filter_by(
-                seller_id=seller.id, candy_id=candy_id
-            ).first()
+            inventory = locked.get(candy_id)
             if not inventory or inventory.inventory_count < quantity:
                 abort(400, description=f"insufficient inventory for {candy.name}")
 

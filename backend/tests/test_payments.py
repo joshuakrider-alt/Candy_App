@@ -5,6 +5,13 @@ import time
 
 import pytest
 from conftest import BUYER_PASSWORD, login
+from sqlalchemy import text
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
+
+from app import seller_inventory_lock_query
+from migrations import USER_ROLE_CONSTRAINT, _ensure_user_role_check_constraint
+from models import db
 
 WEBHOOK_SECRET = "whsec_test_secret"
 
@@ -18,6 +25,27 @@ def place_order(buyer, seller_id, candy_id, quantity=1):
     return buyer.post(
         "/orders",
         json={"seller_id": seller_id, "items": [{"candy_id": candy_id, "quantity": quantity}]},
+    )
+
+
+def inventory_count(client, seller_id, candy_id):
+    items = client.get(f"/sellers/{seller_id}/storefront").get_json()["items"]
+    row = next((item for item in items if item["candy_id"] == candy_id), None)
+    # Sold-out items drop off the storefront entirely.
+    return row["inventory_count"] if row else 0
+
+
+def user_role_constraint_exists():
+    return (
+        db.session.execute(
+            text(
+                "SELECT 1 FROM pg_constraint constraint_row "
+                "JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid "
+                "WHERE constraint_row.conname = :name AND table_row.relname = 'user'"
+            ),
+            {"name": USER_ROLE_CONSTRAINT},
+        ).first()
+        is not None
     )
 
 
@@ -431,3 +459,126 @@ def test_buyer_order_history_hides_codes_until_paid(client, buyer, kiki_seller, 
     fake_stripe.mark_paid(fake_stripe.last_session_id)
     buyer.post(f"/orders/{order['id']}/payment/confirm")
     assert buyer.get("/me/orders").get_json()[0]["pickup_code"].startswith("CL-")
+
+
+def test_repeated_cart_lines_are_merged_into_one_reservation(
+    client, buyer, kiki_seller, fake_stripe
+):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    starting_count = item["inventory_count"]
+
+    created = buyer.post(
+        "/orders",
+        json={
+            "seller_id": seller_id,
+            "items": [
+                {"candy_id": item["candy_id"], "quantity": 2},
+                {"candy_id": item["candy_id"], "quantity": 1},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.get_json()
+    order = created.get_json()
+
+    assert [(line["candy_id"], line["quantity"]) for line in order["items"]] == [
+        (item["candy_id"], 3)
+    ]
+    assert order["total_cents"] == item["candy"]["price_cents"] * 3
+    assert inventory_count(client, seller_id, item["candy_id"]) == starting_count - 3
+
+
+def test_merged_cart_lines_are_checked_against_stock_as_one_total(
+    client, buyer, kiki_seller, fake_stripe
+):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    kiki_seller.put(
+        f"/sellers/{seller_id}/inventory/{item['candy_id']}",
+        json={"inventory_count": 3, "status": "low-stock"},
+    )
+
+    # Each line fits on its own, but together they ask for more than is left.
+    response = buyer.post(
+        "/orders",
+        json={
+            "seller_id": seller_id,
+            "items": [
+                {"candy_id": item["candy_id"], "quantity": 2},
+                {"candy_id": item["candy_id"], "quantity": 2},
+            ],
+        },
+    )
+    assert response.status_code == 400
+    assert "insufficient inventory" in response.get_json()["error"]
+
+    assert inventory_count(client, seller_id, item["candy_id"]) == 3
+    assert fake_stripe.created_sessions == []
+
+
+def test_checkout_locks_inventory_rows_in_candy_id_order(app):
+    """The lock is what stops two simultaneous checkouts from overselling."""
+    with app.app_context():
+        statement = seller_inventory_lock_query(4, [9, 2, 5]).statement
+        sql = str(
+            statement.compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+        )
+
+    assert "FOR UPDATE" in sql
+    assert "ORDER BY seller_inventory.candy_id ASC" in sql
+    # Sorted ids keep two overlapping carts from deadlocking on each other.
+    assert "IN (2, 5, 9)" in sql
+
+
+def test_the_lock_is_dropped_on_sqlite_and_checkout_still_works(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    item = first_in_stock_item(client, kiki_seller.user["seller_id"])
+    with app.app_context():
+        if db.engine.dialect.name != "sqlite":
+            pytest.skip("this checks the SQLite no-op path")
+        sql = str(seller_inventory_lock_query(1, [item["candy_id"]]).statement.compile(db.engine))
+
+    assert "FOR UPDATE" not in sql
+    assert place_order(buyer, kiki_seller.user["seller_id"], item["candy_id"]).status_code == 201
+
+
+def test_user_role_check_constraint_is_a_no_op_off_postgres(app):
+    with app.app_context():
+        if db.engine.dialect.name == "postgresql":
+            pytest.skip("Postgres is covered by the backfill test")
+        # SQLite cannot add a constraint to an existing table, and the model
+        # already declares it for databases created from scratch.
+        assert _ensure_user_role_check_constraint({"user"}) is False
+
+
+def test_user_role_check_constraint_is_backfilled_on_postgres(app):
+    with app.app_context():
+        if db.engine.dialect.name != "postgresql":
+            pytest.skip("requires TEST_DATABASE_URL to point at Postgres")
+
+        # Stand in for the production table, which was created before the
+        # model declared the constraint.
+        db.session.execute(
+            text(f'ALTER TABLE "user" DROP CONSTRAINT IF EXISTS {USER_ROLE_CONSTRAINT}')
+        )
+        db.session.commit()
+        assert user_role_constraint_exists() is False
+
+        assert _ensure_user_role_check_constraint({"user"}) is True
+        assert user_role_constraint_exists() is True
+
+        # Running it again on an already-constrained table changes nothing.
+        assert _ensure_user_role_check_constraint({"user"}) is False
+        assert user_role_constraint_exists() is True
+
+        with pytest.raises(IntegrityError):
+            db.session.execute(
+                text(
+                    'INSERT INTO "user" (name, email, role, created_at) '
+                    "VALUES ('Mallory', 'mallory@example.com', 'superuser', CURRENT_TIMESTAMP)"
+                )
+            )
+        db.session.rollback()
