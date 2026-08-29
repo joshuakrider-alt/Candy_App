@@ -4,7 +4,7 @@
  * publishable key and the platform fee come from the API's /config endpoint.
  */
 
-const DEFAULT_API_BASE_URL = "https://candy-lady-api.onrender.com";
+const DEFAULT_API_BASE_URL = "https://api.neighborhoodcandylady.com";
 const LOCAL_API_BASE_URL = "http://127.0.0.1:5000";
 const API_BASE_OVERRIDE_KEY = "candyLadyApiBase";
 
