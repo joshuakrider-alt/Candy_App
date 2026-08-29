@@ -158,3 +158,17 @@ def test_migrations_are_idempotent(legacy_app):
     with legacy_app.app_context():
         assert run_migrations() == set()
         assert run_migrations() == set()
+
+
+def test_a_postgres_scheme_url_is_normalized(monkeypatch):
+    """Neon hands out postgres:// URLs, which SQLAlchemy 2 refuses to parse."""
+    from app import resolve_database_url
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://user:pw@example.test/candy")
+    assert resolve_database_url() == "postgresql://user:pw@example.test/candy"
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg2://user:pw@example.test/candy")
+    assert resolve_database_url() == "postgresql+psycopg2://user:pw@example.test/candy"
+
+    monkeypatch.delenv("DATABASE_URL")
+    assert resolve_database_url().startswith("sqlite:///")

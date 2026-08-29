@@ -56,14 +56,20 @@ def _env_int(name, default):
         return int(default)
 
 
-def create_app(config_overrides=None):
-    app = Flask(__name__)
+def resolve_database_url():
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         db_path = os.path.join(os.path.dirname(__file__), "data.db")
-        database_url = f"sqlite:///{db_path}"
+        return f"sqlite:///{db_path}"
+    # Neon and Heroku hand out postgres:// URLs, which SQLAlchemy 2 rejects.
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql://", 1)
+    return database_url
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+
+def create_app(config_overrides=None):
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = resolve_database_url()
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["JWT_SECRET_KEY"] = os.environ.get(
         "JWT_SECRET_KEY",
@@ -839,9 +845,14 @@ def register_routes(app):
 
         return jsonify(received=True, handled=True)
 
-    def _order_for_session(session):
-        metadata = session.get("metadata") or {}
-        order_id = metadata.get("order_id") or session.get("client_reference_id")
+    def _order_for_session(event_object):
+        """Find the order behind a webhook payload.
+
+        Checkout sessions carry our metadata, but a charge (refund events) may
+        not, so fall back to the stored session and payment intent ids.
+        """
+        metadata = event_object.get("metadata") or {}
+        order_id = metadata.get("order_id") or event_object.get("client_reference_id")
         if order_id:
             try:
                 order = Order.query.get(int(order_id))
@@ -849,9 +860,18 @@ def register_routes(app):
                 order = None
             if order:
                 return order
-        session_id = session.get("id")
+
+        session_id = event_object.get("id")
         if session_id:
-            return Order.query.filter_by(stripe_checkout_session_id=session_id).first()
+            order = Order.query.filter_by(stripe_checkout_session_id=session_id).first()
+            if order:
+                return order
+
+        payment_intent = event_object.get("payment_intent")
+        if isinstance(payment_intent, dict):
+            payment_intent = payment_intent.get("id")
+        if payment_intent:
+            return Order.query.filter_by(stripe_payment_intent_id=payment_intent).first()
         return None
 
     # ------------------------------------------------------------------

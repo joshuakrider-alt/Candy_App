@@ -277,6 +277,37 @@ def test_webhook_marks_the_order_paid(make_app, fake_stripe):
     assert paid["pickup_code"].startswith("CL-")
 
 
+def test_webhook_matches_a_refund_by_payment_intent(make_app, fake_stripe):
+    app = make_app(STRIPE_WEBHOOK_SECRET=WEBHOOK_SECRET)
+    client = app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    seller = client.get("/sellers").get_json()[0]
+    item = first_in_stock_item(client, seller["id"])
+    order = place_order(buyer, seller["id"], item["candy_id"]).get_json()
+
+    session_id = fake_stripe.last_session_id
+    fake_stripe.mark_paid(session_id)
+    buyer.post(f"/orders/{order['id']}/payment/confirm")
+
+    # A charge event carries no order metadata, only the payment intent.
+    body, headers = signed_webhook(
+        {
+            "id": "evt_test_refund",
+            "type": "charge.refunded",
+            "data": {
+                "object": {
+                    "id": "ch_test_1",
+                    "object": "charge",
+                    "payment_intent": f"pi_test_{session_id}",
+                }
+            },
+        }
+    )
+    response = client.post("/stripe/webhook", data=body, headers=headers)
+    assert response.get_json() == {"received": True, "handled": True}
+    assert buyer.get(f"/orders/{order['id']}").get_json()["payment_status"] == "refunded"
+
+
 def test_webhook_rejects_a_bad_signature(make_app, fake_stripe):
     app = make_app(STRIPE_WEBHOOK_SECRET=WEBHOOK_SECRET)
     client = app.test_client()
