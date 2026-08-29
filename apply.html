@@ -21,7 +21,6 @@
           <a href="seller.html">Sell</a>
           <a href="admin.html">Admin</a>
           <a class="active-link" href="apply.html">Apply</a>
-          <button class="nav-action" type="button" data-reset-demo>Reset</button>
         </div>
       </nav>
 
@@ -31,15 +30,15 @@
             <p class="eyebrow">Seller application</p>
             <h1 class="app-title">Apply to run a neighborhood snack spot.</h1>
             <p class="hero-text">
-              Share your shop name, neighborhood, pickup window, and the
-              categories you want to sell. An admin reviews each application
-              before you go live.
+              Share your shop details and pick the password you will use to sign
+              in. Your login works right away; your shop goes live for buyers
+              once an admin approves it.
             </p>
           </div>
           <div class="stats-row">
-            <div class="stat-chip"><strong>4</strong><span>Application steps</span></div>
+            <div class="stat-chip"><strong>1</strong><span>Application form</span></div>
             <div class="stat-chip"><strong>3</strong><span>Snack categories</span></div>
-            <div class="stat-chip"><strong>1</strong><span>Review queue</span></div>
+            <div class="stat-chip"><strong>1</strong><span>Admin review</span></div>
           </div>
         </section>
 
@@ -70,12 +69,44 @@
               <input name="pickupWindow" required placeholder="Weekdays, 2:30 PM - 7:00 PM" />
             </label>
 
-            <fieldset class="form-field checkbox-group">
-              <legend>Approved categories requested</legend>
-              <label><input type="checkbox" name="categories" value="Candy" /> Candy</label>
-              <label><input type="checkbox" name="categories" value="Chips" /> Chips</label>
-              <label><input type="checkbox" name="categories" value="Drinks" /> Drinks</label>
-            </fieldset>
+            <div class="section-heading">
+              <p class="eyebrow">Your seller login</p>
+              <h2>Choose a password</h2>
+            </div>
+
+            <label class="form-field">
+              <span>Email</span>
+              <input
+                type="email"
+                name="email"
+                autocomplete="email"
+                required
+                placeholder="you@example.com"
+              />
+            </label>
+
+            <div class="form-row">
+              <label class="form-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  name="password"
+                  autocomplete="new-password"
+                  minlength="8"
+                  required
+                />
+              </label>
+              <label class="form-field">
+                <span>Confirm password</span>
+                <input
+                  type="password"
+                  name="passwordConfirm"
+                  autocomplete="new-password"
+                  minlength="8"
+                  required
+                />
+              </label>
+            </div>
 
             <label class="form-field">
               <span>Pickup notes</span>
@@ -99,7 +130,7 @@
               <div><span>Status</span><strong>No application yet</strong></div>
               <div><span>Next step</span><strong>Submit the form</strong></div>
             </div>
-            <a class="secondary-button" href="admin.html">Open admin review</a>
+            <a class="secondary-button" href="seller.html">Go to seller login</a>
           </aside>
         </section>
       </main>

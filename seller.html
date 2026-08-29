@@ -22,7 +22,6 @@
           <a href="admin.html">Admin</a>
           <a href="apply.html">Apply</a>
           <button class="nav-action" type="button" data-logout hidden>Log out</button>
-          <button class="nav-action" type="button" data-reset-demo>Reset</button>
         </div>
       </nav>
 
@@ -30,35 +29,52 @@
         <div class="section-heading">
           <p class="eyebrow">Seller login</p>
           <h1 class="app-title">Sign in to manage your snack spot.</h1>
-          <p class="hero-text">Use a seeded account email for this prototype.</p>
+          <p class="hero-text">
+            Use the email and password you chose on your seller application. No
+            shop yet? <a class="text-link" href="apply.html">Apply to sell</a>.
+          </p>
         </div>
         <form class="application-form" data-login-form>
           <label class="form-field">
-            Email
-            <input type="email" name="email" value="alice@example.com" required />
+            <span>Email</span>
+            <input type="email" name="email" autocomplete="email" required />
           </label>
           <label class="form-field">
-            Password
-            <input type="password" name="password" required />
+            <span>Password</span>
+            <input
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              required
+            />
           </label>
           <button class="primary-button dark" type="submit">Log in</button>
-          <p class="order-message" data-login-message></p>
+          <p class="order-message" data-login-message role="status"></p>
         </form>
       </section>
 
       <main class="app-layout" data-dashboard-main hidden>
+        <p class="order-message shop-notice" data-shop-notice hidden></p>
+
         <section class="app-hero reveal">
           <div>
             <p class="eyebrow">Seller dashboard</p>
             <h1 class="app-title">Run your snack spot with a few taps.</h1>
             <p class="hero-text">
-              Toggle stock from the approved catalog and move pickup orders
-              from new to packing to ready.
+              Orders show up here after the buyer pays by card. Toggle stock from
+              the approved catalog and move orders from new to ready.
             </p>
           </div>
           <div class="stats-row">
-            <div class="stat-chip"><strong data-seller-order-count>0</strong><span>Active orders</span></div>
-            <div class="stat-chip"><strong data-in-stock-count>0</strong><span>Items in stock</span></div>
+            <div class="stat-chip">
+              <strong data-seller-order-count>0</strong><span>Paid orders</span>
+            </div>
+            <div class="stat-chip">
+              <strong data-in-stock-count>0</strong><span>Items in stock</span>
+            </div>
+            <div class="stat-chip">
+              <strong data-seller-payout-total>$0.00</strong><span>Your cut, queued</span>
+            </div>
           </div>
         </section>
 
@@ -66,7 +82,7 @@
           <div class="app-panel">
             <div class="section-heading">
               <p class="eyebrow">Today's orders</p>
-              <h2>Pickup queue</h2>
+              <h2>Paid pickup queue</h2>
             </div>
             <div class="order-list">
               <p class="empty-state">Loading orders…</p>
@@ -82,7 +98,8 @@
               <div><span>Neighborhood</span><strong data-shop-neighborhood>—</strong></div>
               <div><span>Hours</span><strong data-shop-hours>—</strong></div>
               <div><span>Status</span><strong data-shop-status>—</strong></div>
-              <div><span>Payment</span><strong>Pay at pickup</strong></div>
+              <div><span>Payment</span><strong>Card at checkout</strong></div>
+              <div><span>Platform cut</span><strong data-fee-note>—</strong></div>
             </div>
           </aside>
         </section>

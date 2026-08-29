@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="app-body">
-    <div class="page-shell">
+    <div class="page-shell" data-buyer-app>
       <nav class="topbar app-topbar">
         <a class="brand-pill" href="index.html">The Candy Lady</a>
         <div class="topbar-links">
@@ -21,27 +21,110 @@
           <a href="seller.html">Sell</a>
           <a href="admin.html">Admin</a>
           <a href="apply.html">Apply</a>
-          <button class="nav-action" type="button" data-reset-demo>Reset</button>
         </div>
       </nav>
 
       <main class="app-layout">
         <section class="app-hero reveal">
           <div>
-            <p class="eyebrow">Neighborhood shop</p>
+            <p class="eyebrow">Neighborhood shops</p>
             <h1 class="app-title">Order from a snack spot you can walk to.</h1>
             <p class="hero-text">
-              This first live shop is Ms. Kiki's Snack Spot. Add in-stock candy,
-              chips, and drinks, then pick up with your code.
+              Pick an approved shop, pay by card, and collect your order with a
+              pickup code.
             </p>
           </div>
           <div class="hero-actions compact">
-            <a class="primary-button" href="#seller-cards">See the shop</a>
+            <a class="primary-button" href="#seller-cards">Choose a shop</a>
             <a class="secondary-button" href="#cart-preview">View cart</a>
           </div>
         </section>
 
-        <section class="filter-bar reveal" data-buyer-app>
+        <section class="app-panel payment-banner" data-payment-banner hidden></section>
+
+        <section class="app-panel account-panel reveal" data-account-panel id="account">
+          <div class="section-heading">
+            <p class="eyebrow">Your account</p>
+            <h2>Sign in to pay and get your pickup code</h2>
+          </div>
+
+          <div data-signed-out>
+            <div class="filter-controls auth-tabs">
+              <button class="filter-button active" type="button" data-auth-tab="login">
+                Sign in
+              </button>
+              <button class="filter-button" type="button" data-auth-tab="signup">
+                Create account
+              </button>
+            </div>
+
+            <form class="application-form" data-buyer-login-form>
+              <div class="form-row">
+                <label class="form-field">
+                  <span>Email</span>
+                  <input type="email" name="email" autocomplete="email" required />
+                </label>
+                <label class="form-field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    name="password"
+                    autocomplete="current-password"
+                    required
+                  />
+                </label>
+              </div>
+              <button class="primary-button dark" type="submit">Sign in</button>
+            </form>
+
+            <form class="application-form" data-buyer-signup-form hidden>
+              <div class="form-row">
+                <label class="form-field">
+                  <span>Name</span>
+                  <input name="name" autocomplete="name" required />
+                </label>
+                <label class="form-field">
+                  <span>Email</span>
+                  <input type="email" name="email" autocomplete="email" required />
+                </label>
+                <label class="form-field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    name="password"
+                    autocomplete="new-password"
+                    minlength="8"
+                    required
+                  />
+                </label>
+              </div>
+              <button class="primary-button dark" type="submit">Create account</button>
+            </form>
+          </div>
+
+          <div class="profile-stack" data-signed-in hidden>
+            <div><span>Signed in as</span><strong data-account-name>—</strong></div>
+            <div><span>Email</span><strong data-account-email>—</strong></div>
+            <div>
+              <span>Session</span>
+              <button class="soft-action" type="button" data-buyer-logout>Sign out</button>
+            </div>
+          </div>
+
+          <p class="order-message" data-account-message role="status"></p>
+        </section>
+
+        <section class="app-section reveal" id="seller-cards">
+          <div class="section-heading">
+            <p class="eyebrow">Open shops</p>
+            <h2>Pickup around the corner</h2>
+          </div>
+          <div class="seller-card-grid" data-seller-cards>
+            <p class="empty-state">Loading neighborhood shops…</p>
+          </div>
+        </section>
+
+        <section class="filter-bar reveal">
           <label class="search-field">
             <span>Search</span>
             <input
@@ -55,17 +138,6 @@
             <button class="filter-button" type="button" data-filter="candy">Candy</button>
             <button class="filter-button" type="button" data-filter="chips">Chips</button>
             <button class="filter-button" type="button" data-filter="drinks">Drinks</button>
-            <button class="filter-button" type="button" data-filter="open">Open now</button>
-          </div>
-        </section>
-
-        <section class="app-section reveal" id="seller-cards">
-          <div class="section-heading">
-            <p class="eyebrow">Open shop</p>
-            <h2>Pickup around the corner</h2>
-          </div>
-          <div class="seller-card-grid" data-seller-cards>
-            <p class="empty-state">Loading the neighborhood shop…</p>
           </div>
         </section>
 
@@ -73,9 +145,11 @@
           <div class="app-panel">
             <div class="section-heading">
               <p class="eyebrow">In stock now</p>
-              <h2>What you can pick up today</h2>
+              <h2 data-shelf-heading>What you can pick up today</h2>
             </div>
-            <div class="catalog-list" data-product-list></div>
+            <div class="catalog-list" data-product-list>
+              <p class="empty-state">Pick a shop above to see what is in stock.</p>
+            </div>
             <p class="empty-state" data-empty-state hidden>No matching snacks found.</p>
           </div>
 
@@ -88,14 +162,25 @@
               <p class="empty-state">No snacks added yet.</p>
             </div>
             <div class="cart-summary">
-              <div><span>Pickup from</span><strong data-pickup-from>Ms. Kiki's Snack Spot</strong></div>
-              <div><span>Pickup code</span><strong data-pickup-code>Not placed yet</strong></div>
+              <div><span>Pickup from</span><strong data-pickup-from>Choose a shop</strong></div>
               <div><span>Total</span><strong data-cart-total>$0.00</strong></div>
-              <div><span>Payment</span><strong>Pay seller at pickup</strong></div>
+              <div><span>Payment</span><strong data-payment-note>Card at checkout</strong></div>
             </div>
-            <button class="primary-button" type="button" data-place-order>Place pickup order</button>
+            <button class="primary-button" type="button" data-place-order disabled>
+              Pay & reserve
+            </button>
             <p class="order-message" data-order-message role="status"></p>
           </aside>
+        </section>
+
+        <section class="app-section reveal" id="orders">
+          <div class="section-heading">
+            <p class="eyebrow">Your orders</p>
+            <h2>Pickup codes and history</h2>
+          </div>
+          <div class="order-list" data-order-history>
+            <p class="empty-state">Sign in to see your pickup codes and past orders.</p>
+          </div>
         </section>
       </main>
     </div>
