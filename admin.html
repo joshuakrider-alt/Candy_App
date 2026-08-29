@@ -22,7 +22,6 @@
           <a class="active-link" href="admin.html">Admin</a>
           <a href="apply.html">Apply</a>
           <button class="nav-action" type="button" data-logout hidden>Log out</button>
-          <button class="nav-action" type="button" data-reset-demo>Reset</button>
         </div>
       </nav>
 
@@ -30,19 +29,24 @@
         <div class="section-heading">
           <p class="eyebrow">Admin login</p>
           <h1 class="app-title">Sign in to review sellers.</h1>
-          <p class="hero-text">Use a seeded account email for this prototype.</p>
+          <p class="hero-text">Admin accounts only.</p>
         </div>
         <form class="application-form" data-login-form>
           <label class="form-field">
-            Email
-            <input type="email" name="email" value="alice@example.com" required />
+            <span>Email</span>
+            <input type="email" name="email" autocomplete="email" required />
           </label>
           <label class="form-field">
-            Password
-            <input type="password" name="password" required />
+            <span>Password</span>
+            <input
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              required
+            />
           </label>
           <button class="primary-button dark" type="submit">Log in</button>
-          <p class="order-message" data-login-message></p>
+          <p class="order-message" data-login-message role="status"></p>
         </form>
       </section>
 
@@ -52,13 +56,20 @@
             <p class="eyebrow">Platform controls</p>
             <h1 class="app-title">Keep sellers and snacks on brand.</h1>
             <p class="hero-text">
-              Approve neighborhood shops and keep the catalog consistent.
+              Approve neighborhood shops, keep the catalog consistent, and track
+              the platform fee you have earned.
             </p>
           </div>
           <div class="stats-row">
-            <div class="stat-chip"><strong data-active-seller-count>0</strong><span>Active sellers</span></div>
-            <div class="stat-chip"><strong data-approved-item-count>0</strong><span>Catalog items</span></div>
-            <div class="stat-chip"><strong data-pending-review-count>0</strong><span>Pending reviews</span></div>
+            <div class="stat-chip">
+              <strong data-active-seller-count>0</strong><span>Active sellers</span>
+            </div>
+            <div class="stat-chip">
+              <strong data-approved-item-count>0</strong><span>Catalog items</span>
+            </div>
+            <div class="stat-chip">
+              <strong data-pending-review-count>0</strong><span>Pending reviews</span>
+            </div>
           </div>
         </section>
 
@@ -75,6 +86,28 @@
 
           <aside class="app-panel">
             <div class="section-heading">
+              <p class="eyebrow">Platform earnings</p>
+              <h2>Paid orders</h2>
+            </div>
+            <div class="profile-stack" data-revenue-stack>
+              <p class="empty-state">Loading earnings…</p>
+            </div>
+          </aside>
+        </section>
+
+        <section class="app-grid reveal">
+          <div class="app-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Approved inventory</p>
+              <h2>Product catalog</h2>
+            </div>
+            <div class="catalog-admin-grid" data-admin-catalog>
+              <p class="empty-state">Loading catalog…</p>
+            </div>
+          </div>
+
+          <aside class="app-panel">
+            <div class="section-heading">
               <p class="eyebrow">Catalog health</p>
               <h2>Category balance</h2>
             </div>
@@ -84,16 +117,6 @@
               <div><span>Drinks</span><strong data-count-drinks>0 items</strong></div>
             </div>
           </aside>
-        </section>
-
-        <section class="app-section reveal">
-          <div class="section-heading">
-            <p class="eyebrow">Approved inventory</p>
-            <h2>Product catalog</h2>
-          </div>
-          <div class="catalog-admin-grid" data-admin-catalog>
-            <p class="empty-state">Loading catalog…</p>
-          </div>
         </section>
       </main>
     </div>
