@@ -4,3 +4,4 @@ Flask-JWT-Extended
 Flask-Cors
 gunicorn
 psycopg2-binary
+stripe

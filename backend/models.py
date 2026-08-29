@@ -1,10 +1,37 @@
-from datetime import datetime
+import secrets
+from datetime import datetime, timezone
 
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 # Shared SQLAlchemy instance. It is initialized by the Flask application.
 db = SQLAlchemy()
+
+
+def utcnow():
+    """Naive UTC, matching the existing DateTime columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+ROLES = ("buyer", "seller", "admin")
+
+INVENTORY_STATUSES = ("in-stock", "low-stock", "out-of-stock")
+ORDER_STATUSES = ("new", "packing", "ready", "completed")
+
+# "pay_at_pickup" only exists for orders created before online payment shipped.
+PAYMENT_STATUSES = (
+    "unpaid",
+    "pending",
+    "paid",
+    "expired",
+    "refunded",
+    "pay_at_pickup",
+)
+
+# Payment states that let a seller see and fulfill an order.
+FULFILLABLE_PAYMENT_STATUSES = ("paid", "pay_at_pickup")
+
+PICKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 def category_for_name(name):
@@ -16,17 +43,53 @@ def category_for_name(name):
     return "candy"
 
 
+def generate_pickup_code():
+    body = "".join(secrets.choice(PICKUP_CODE_ALPHABET) for _ in range(5))
+    return f"CL-{body}"
+
+
 class User(db.Model):
     __tablename__ = "user"
+    __table_args__ = (
+        db.CheckConstraint(
+            "role IN ('buyer', 'seller', 'admin')",
+            name="ck_user_role",
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(200), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255))
+    role = db.Column(db.String(20), nullable=False, default="buyer")
+    # Set for role="seller": the shop this login manages.
+    seller_id = db.Column(db.Integer, db.ForeignKey("seller.id"))
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     orders = db.relationship("Order", back_populates="user", lazy=True)
+    seller = db.relationship("Seller", back_populates="logins")
+
+    def set_password(self, raw_password):
+        self.password_hash = generate_password_hash(raw_password)
+
+    def check_password(self, raw_password):
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, raw_password)
+
+    @property
+    def has_password(self):
+        return bool(self.password_hash)
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "email": self.email}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "role": self.role,
+            "seller_id": self.seller_id,
+            "has_password": self.has_password,
+        }
 
 
 class Seller(db.Model):
@@ -41,6 +104,7 @@ class Seller(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     shop_name = db.Column(db.String(200), nullable=False)
     contact_name = db.Column(db.String(120), nullable=False)
+    contact_email = db.Column(db.String(200))
     neighborhood = db.Column(db.String(120), nullable=False)
     pickup_window = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), nullable=False, default="pending")
@@ -52,9 +116,10 @@ class Seller(db.Model):
         lazy=True,
     )
     orders = db.relationship("Order", back_populates="seller", lazy=True)
+    logins = db.relationship("User", back_populates="seller", lazy=True)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_contact_email=False):
+        data = {
             "id": self.id,
             "shop_name": self.shop_name,
             "contact_name": self.contact_name,
@@ -62,6 +127,9 @@ class Seller(db.Model):
             "pickup_window": self.pickup_window,
             "status": self.status,
         }
+        if include_contact_email:
+            data["contact_email"] = self.contact_email
+        return data
 
 
 class Candy(db.Model):
@@ -113,6 +181,16 @@ class SellerInventory(db.Model):
     seller = db.relationship("Seller", back_populates="inventory_items")
     candy = db.relationship("Candy", back_populates="seller_inventory")
 
+    def apply_count_change(self, delta):
+        """Adjust quantity and keep the stock label consistent with it."""
+        self.inventory_count = max(0, (self.inventory_count or 0) + delta)
+        if self.inventory_count == 0:
+            self.status = "out-of-stock"
+        elif self.inventory_count <= 4:
+            self.status = "low-stock"
+        else:
+            self.status = "in-stock"
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -138,7 +216,16 @@ class Order(db.Model):
     seller_id = db.Column(db.Integer, db.ForeignKey("seller.id"), nullable=False)
     total_cents = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="new")
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    payment_status = db.Column(db.String(20), nullable=False, default="unpaid")
+    platform_fee_cents = db.Column(db.Integer, nullable=False, default=0)
+    currency = db.Column(db.String(10), nullable=False, default="usd")
+    pickup_code = db.Column(db.String(32))
+    stripe_checkout_session_id = db.Column(db.String(255))
+    stripe_payment_intent_id = db.Column(db.String(255))
+    paid_at = db.Column(db.DateTime)
+    inventory_released_at = db.Column(db.DateTime)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")
@@ -149,16 +236,36 @@ class Order(db.Model):
         lazy=True,
     )
 
-    def to_dict(self):
-        return {
+    @property
+    def seller_payout_cents(self):
+        return max(0, (self.total_cents or 0) - (self.platform_fee_cents or 0))
+
+    @property
+    def is_fulfillable(self):
+        return self.payment_status in FULFILLABLE_PAYMENT_STATUSES
+
+    def to_dict(self, include_pickup_code=True):
+        data = {
             "id": self.id,
             "user_id": self.user_id,
             "seller_id": self.seller_id,
             "status": self.status,
             "total_cents": self.total_cents,
+            "payment_status": self.payment_status,
+            "platform_fee_cents": self.platform_fee_cents,
+            "seller_payout_cents": self.seller_payout_cents,
+            "currency": self.currency,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "items": [item.to_dict() for item in self.items],
         }
+        # The pickup code is the proof of a completed purchase, so it stays
+        # hidden until the order is actually payable at the counter.
+        if include_pickup_code and self.is_fulfillable:
+            data["pickup_code"] = self.pickup_code
+        else:
+            data["pickup_code"] = None
+        return data
 
 
 class OrderItem(db.Model):
@@ -179,5 +286,6 @@ class OrderItem(db.Model):
             "candy_id": self.candy_id,
             "quantity": self.quantity,
             "unit_price_cents": self.unit_price_cents,
+            "line_total_cents": (self.quantity or 0) * (self.unit_price_cents or 0),
             "candy": self.candy.to_dict() if self.candy else None,
         }
