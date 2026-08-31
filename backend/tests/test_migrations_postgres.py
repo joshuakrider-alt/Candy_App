@@ -115,6 +115,38 @@ def test_postgres_legacy_rows_survive_and_gain_payment_columns(legacy_postgres_a
         assert user.has_password is False
 
 
+def test_postgres_legacy_order_survives_the_buyer_deleting_their_account(
+    legacy_postgres_app,
+):
+    """Neon created `order.user_id` NOT NULL; deletion needs it relaxed."""
+    with legacy_postgres_app.app_context():
+        nullable = db.session.execute(
+            text(
+                "SELECT is_nullable FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = 'order' "
+                "AND column_name = 'user_id'"
+            )
+        ).scalar()
+        assert nullable == "YES"
+
+        user = User.query.get(1)
+        user.set_password("a-real-password")
+        db.session.commit()
+
+    client = legacy_postgres_app.test_client()
+    token = client.post(
+        "/login", json={"email": "alice@example.com", "password": "a-real-password"}
+    ).get_json()["access_token"]
+    assert client.delete("/me", headers={"Authorization": f"Bearer {token}"}).status_code == 204
+
+    with legacy_postgres_app.app_context():
+        assert User.query.get(1) is None
+        order = Order.query.get(1)
+        assert order.user_id is None
+        assert order.total_cents == 425
+        assert order.is_fulfillable
+
+
 def test_postgres_migration_is_idempotent_and_new_rows_still_insert(legacy_postgres_app):
     from migrations import run_migrations
 

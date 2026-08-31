@@ -8,6 +8,7 @@ import sqlite3
 
 import pytest
 from conftest import ADMIN_PASSWORD
+from sqlalchemy import inspect
 
 from app import create_app
 from models import Order, User, db
@@ -150,6 +151,37 @@ def test_legacy_pay_at_pickup_order_still_shows_in_the_seller_queue(legacy_app):
     ).get_json()
     assert [row["id"] for row in queue] == [7]
     assert queue[0]["pickup_code"] == "CL-7"
+
+
+def test_a_legacy_order_survives_the_buyer_deleting_their_account(legacy_app):
+    """The old schema made `order.user_id` NOT NULL, so it has to be rebuilt."""
+    with legacy_app.app_context():
+        columns = {
+            column["name"]: column for column in inspect(db.engine).get_columns("order")
+        }
+        assert columns["user_id"]["nullable"] is True
+        # The rebuild has to carry the rows and the pickup code index over.
+        indexes = {index["name"] for index in inspect(db.engine).get_indexes("order")}
+        assert "uq_order_pickup_code" in indexes
+
+        user = User.query.get(1)
+        user.set_password("a-real-password")
+        db.session.commit()
+
+    client = legacy_app.test_client()
+    token = client.post(
+        "/login", json={"email": "alice@example.com", "password": "a-real-password"}
+    ).get_json()["access_token"]
+    deleted = client.delete("/me", headers={"Authorization": f"Bearer {token}"})
+    assert deleted.status_code == 204
+
+    with legacy_app.app_context():
+        assert User.query.get(1) is None
+        order = Order.query.get(7)
+        assert order.user_id is None
+        assert order.total_cents == 425
+        assert order.pickup_code == "CL-7"
+        assert [item.quantity for item in order.items] == [1]
 
 
 def test_migrations_are_idempotent(legacy_app):

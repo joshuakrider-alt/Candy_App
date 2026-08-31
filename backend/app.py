@@ -8,6 +8,7 @@ from flask_jwt_extended import JWTManager
 from sqlalchemy import func
 from werkzeug.exceptions import HTTPException
 
+import accounts
 import payments
 from auth import (
     assert_order_access,
@@ -370,6 +371,34 @@ def register_routes(app):
         db.session.commit()
         return jsonify(user.to_dict())
 
+    @app.route("/me", methods=["DELETE"])
+    @require_roles()
+    def delete_me():
+        """Permanently delete the signed-in account (App Store 5.1.1(v)).
+
+        The token is the authorization, like every other /me route. A client
+        that wants the extra confirmation step can also send the account
+        password, and then it has to be right.
+        """
+        user = current_user()
+        accounts.assert_self_deletable(user)
+
+        data = request.get_json(silent=True) or {}
+        password = data.get("password")
+        if password and not user.check_password(password):
+            abort(401, description="current password is incorrect")
+
+        # Hand back the stock held by checkouts the buyer will never finish.
+        for order in accounts.orders_to_release(user):
+            release_order_inventory(order)
+            order.payment_status = "expired"
+
+        accounts.delete_account(user)
+        db.session.commit()
+        # The token outlives the row by design, but every authenticated route
+        # resolves it to a user first, so it stops working right now.
+        return "", 204
+
     @app.route("/me/orders", methods=["GET"])
     @require_roles()
     def list_my_orders():
@@ -667,7 +696,11 @@ def register_routes(app):
         payload = []
         for order in orders:
             data = order.to_dict()
-            data["buyer_name"] = order.user.name if order.user else None
+            # A missing buyer means the account was deleted; the order still
+            # has to be handed over, so it stays in the queue without a name.
+            data["buyer_name"] = (
+                order.user.name if order.user else accounts.ANONYMOUS_BUYER_LABEL
+            )
             payload.append(data)
         return jsonify(payload)
 
