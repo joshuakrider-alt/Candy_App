@@ -29,6 +29,7 @@ pickup code.
 - Pickup codes released only after payment clears
 - Sellers see and fulfill only their own paid orders
 - Admins approve sellers, who then log in with the password they chose
+- Buyers and sellers can permanently delete their own account (`DELETE /me`)
 
 ## Accounts and roles
 
@@ -48,6 +49,26 @@ The shared prototype password and the "Reset demo" button are gone.
 Accounts created before this change have no password. Set one with
 `python manage.py set-password --email … --password …`, or from the admin API
 (`PUT /users/<id>/password`).
+
+### Deleting an account
+
+`DELETE /me`, with the account's own token, permanently deletes that login. The
+mobile app needs this: App Store guideline 5.1.1(v) requires in-app account
+deletion from any app that creates accounts.
+
+```
+curl -X DELETE https://api.neighborhoodcandylady.com/me \
+  -H "Authorization: Bearer <token>"
+```
+
+The user row is gone, so the email and name are gone with it and the account
+cannot log in again. Orders stay, de-identified: a seller can still hand over a
+bag that was already paid for, and the platform can still account for the money
+it took, but nothing on the order points back to a person. A seller who was the
+last login for a shop takes the shop off the buyer-facing list (back to
+pending) instead of taking its inventory or other buyers' orders with them.
+Admins cannot delete themselves this way; another admin removes them.
+`backend/README.md` has the full breakdown.
 
 ## Payments (Stripe test mode)
 
@@ -145,6 +166,17 @@ account and Stripe test keys set.
 1. Signed in as a buyer on `buyer.html`, open `admin.html`. It refuses with "That account is not an admin."
 2. Same for `seller.html` with a buyer account.
 3. As admin, `admin.html` shows "Platform earnings": paid order count, collected total, platform fee earned, and owed to sellers.
+
+**6. A buyer deletes their account**
+
+The web pages have no delete button yet — this is for the mobile app — so drive
+it with `curl`.
+
+1. Sign up as a throwaway buyer on `buyer.html`, then pay for an order at a shop you can also log into as the seller.
+2. In that tab's DevTools console, run `localStorage.getItem("candyLadyToken")` and copy the token.
+3. `curl -i -X DELETE https://api.neighborhoodcandylady.com/me -H "Authorization: Bearer <token>"` → `204 No Content`.
+4. Try to log in on `buyer.html` with that email and password: it fails. Sign up again with the same email and you get a fresh, empty account.
+5. Open `seller.html` as the shop. The paid order is still in the queue with its pickup code and total, and the buyer's name now reads "Deleted account".
 
 ## Local development
 
