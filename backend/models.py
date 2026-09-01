@@ -212,7 +212,9 @@ class Order(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    # Nullable so an order survives its buyer deleting their account: the row
+    # keeps the money and fulfillment details, minus any link to a person.
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     seller_id = db.Column(db.Integer, db.ForeignKey("seller.id"), nullable=False)
     total_cents = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="new")

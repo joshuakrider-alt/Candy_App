@@ -8,13 +8,17 @@ columns in place and backfill them, and they are safe to run on every boot.
 
 import logging
 
-from sqlalchemy import inspect, text
+from sqlalchemy import MetaData, inspect, text
+from sqlalchemy.schema import CreateTable
 
-from models import ROLES, db
+from models import ROLES, Order, Seller, User, db
 
 logger = logging.getLogger(__name__)
 
 USER_ROLE_CONSTRAINT = "ck_user_role"
+
+# Scratch name used while SQLite rebuilds the order table.
+ORDER_REBUILD_TABLE = "order_user_id_rebuild"
 
 # (table, column, DDL type + default). Defaults must be constants so that
 # SQLite accepts them in ALTER TABLE ... ADD COLUMN.
@@ -57,9 +61,99 @@ def run_migrations():
         added.add((table, column))
         logger.info("migration: added %s.%s", table, column)
 
+    _relax_order_user_id_not_null(existing_tables)
     _backfill(existing_tables, added)
     _ensure_user_role_check_constraint(existing_tables)
     return added
+
+
+def _relax_order_user_id_not_null(existing_tables):
+    """Allow `order.user_id` to be NULL so deleted accounts leave their orders.
+
+    Account deletion de-identifies orders instead of destroying sales a seller
+    still has to fulfill, which needs the column to be nullable. Databases
+    created before this ran have it NOT NULL. This is not wrapped in a
+    try/except: without the change `DELETE /me` cannot work, so a deploy that
+    fails here should fail loudly rather than half-ship the feature.
+    """
+    if "order" not in existing_tables:
+        return False
+
+    user_id = next(
+        (
+            column
+            for column in inspect(db.engine).get_columns("order")
+            if column["name"] == "user_id"
+        ),
+        None,
+    )
+    if user_id is None or user_id["nullable"]:
+        return False
+
+    if db.engine.dialect.name == "postgresql":
+        with db.engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"ALTER TABLE {_quote('order')} "
+                    "ALTER COLUMN user_id DROP NOT NULL"
+                )
+            )
+    elif db.engine.dialect.name == "sqlite":
+        _rebuild_sqlite_order_table()
+    else:  # pragma: no cover - only SQLite and Postgres are supported
+        logger.warning(
+            "migration: cannot relax order.user_id on %s", db.engine.dialect.name
+        )
+        return False
+
+    logger.info("migration: order.user_id is now nullable")
+    return True
+
+
+def _rebuild_sqlite_order_table():
+    """Copy the order table into one built from the current model.
+
+    SQLite has no `ALTER COLUMN`, so relaxing a NOT NULL means rebuilding the
+    table. Foreign keys are switched off for the swap, and `legacy_alter_table`
+    keeps the rename from tripping over `order_item`'s reference to the table
+    being replaced.
+    """
+    existing = {column["name"] for column in inspect(db.engine).get_columns("order")}
+    carried = [
+        column.name for column in Order.__table__.columns if column.name in existing
+    ]
+    column_list = ", ".join(_quote(name) for name in carried)
+
+    # The copy needs the tables it points at, or its foreign keys cannot be
+    # resolved into DDL. Only the order table is ever created from this.
+    staging_metadata = MetaData()
+    for parent in (User.__table__, Seller.__table__):
+        parent.to_metadata(staging_metadata)
+    staging = Order.__table__.to_metadata(staging_metadata, name=ORDER_REBUILD_TABLE)
+    statements = (
+        str(CreateTable(staging).compile(db.engine)),
+        f"INSERT INTO {_quote(ORDER_REBUILD_TABLE)} ({column_list}) "
+        f"SELECT {column_list} FROM {_quote('order')}",
+        f"DROP TABLE {_quote('order')}",
+        f"ALTER TABLE {_quote(ORDER_REBUILD_TABLE)} RENAME TO {_quote('order')}",
+    )
+
+    with db.engine.connect() as connection:
+        connection.execution_options(isolation_level="AUTOCOMMIT")
+        connection.execute(text(f"DROP TABLE IF EXISTS {_quote(ORDER_REBUILD_TABLE)}"))
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        connection.execute(text("PRAGMA legacy_alter_table=ON"))
+        try:
+            connection.execute(text("BEGIN"))
+            for statement in statements:
+                connection.execute(text(statement))
+            connection.execute(text("COMMIT"))
+        except Exception:
+            connection.execute(text("ROLLBACK"))
+            raise
+        finally:
+            connection.execute(text("PRAGMA legacy_alter_table=OFF"))
+            connection.execute(text("PRAGMA foreign_keys=ON"))
 
 
 def _ensure_user_role_check_constraint(existing_tables):

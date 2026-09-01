@@ -156,6 +156,9 @@ class ApiUser:
     def put(self, path, json=None, **kwargs):
         return self.client.put(path, json=json, headers=self.headers, **kwargs)
 
+    def delete(self, path, json=None, **kwargs):
+        return self.client.delete(path, json=json, headers=self.headers, **kwargs)
+
 
 def login(client, email, password):
     response = client.post("/login", json={"email": email, "password": password})
