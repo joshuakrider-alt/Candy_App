@@ -767,6 +767,45 @@ if (buyerApp) {
     const orderId = params.get("order");
     if (!orderId) return;
 
+    // Stripe requires an https success_url, so a payment started in the Android
+    // app finishes here, inside a Chrome Custom Tab, rather than back in the app.
+    // That tab has no Candy Lady session of its own -- the app stores its token
+    // in EncryptedSharedPreferences, not browser storage -- so every branch below
+    // this point is unreachable for those buyers and they are left looking at a
+    // page that never says anything about the payment they just made.
+    //
+    // A web buyer is always signed in by the time Stripe sends them back (they
+    // had to be, to place the order), so "returned from Stripe, nobody signed in"
+    // identifies the app's tab without guessing at user agents. Handing off to
+    // the app's own scheme brings it to the front, and it confirms the payment
+    // over the authenticated connection it already holds. Only the order id
+    // travels: the Stripe session id stays out of a link any installed app could
+    // claim. If nothing answers the scheme, the buyer still has the manual link.
+    const returnedFromStripe =
+      Boolean(params.get("session_id")) || params.get("payment") === "cancelled";
+    if (returnedFromStripe && !session.isLoggedIn()) {
+      const appLink = `candylady://checkout-return?order=${encodeURIComponent(orderId)}`;
+      showBanner(
+        "pending",
+        `
+          <p class="card-label">Finishing up</p>
+          <h2>Taking you back to the app…</h2>
+          <p>
+            If you are still here in a moment,
+            <a href="${escapeHtml(appLink)}">reopen The Candy Lady</a> to see your
+            pickup code. Your order is safe either way.
+          </p>
+        `
+      );
+      // Only auto-jump where the scheme is actually registered. Anywhere else a
+      // dead scheme can replace this page with a browser error, and the banner
+      // above is more use than that.
+      if (/Android/i.test(navigator.userAgent)) {
+        window.location.href = appLink;
+      }
+      return;
+    }
+
     if (params.get("payment") === "cancelled") {
       showBanner(
         "cancelled",
