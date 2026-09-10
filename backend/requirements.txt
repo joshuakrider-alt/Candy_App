@@ -5,3 +5,4 @@ Flask-Cors
 gunicorn
 psycopg2-binary
 stripe
+boto3

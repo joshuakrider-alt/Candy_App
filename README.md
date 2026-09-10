@@ -98,6 +98,42 @@ Remove `PROTOTYPE_LOGIN_PASSWORD`.
 If `STRIPE_SECRET_KEY` is missing, placing an order fails with a 503 that names
 the variable, and no stock is reserved.
 
+### Photo uploads and identity verification
+
+Photos go from the browser straight to an S3-compatible bucket; they never pass
+through the API. Leave these unset and uploads simply stay switched off — the
+frontend hides the controls rather than offering a button that cannot work.
+
+| Variable | Value |
+| --- | --- |
+| `STORAGE_ENDPOINT_URL` | `https://<account-id>.r2.cloudflarestorage.com` |
+| `STORAGE_BUCKET` | the bucket name, e.g. `candy-lady-photos` |
+| `STORAGE_ACCESS_KEY_ID` | from the R2 API token |
+| `STORAGE_SECRET_ACCESS_KEY` | from the same token |
+| `STORAGE_PUBLIC_BASE_URL` | the bucket's public URL, e.g. `https://photos.neighborhoodcandylady.com` |
+| `STORAGE_REGION` | `auto` for R2; a real region for S3 |
+| `MAX_UPLOAD_BYTES` | optional, defaults to 8MB |
+| `MAX_SELLER_PHOTOS` | optional, defaults to 12 per shop |
+| `REQUIRE_SELLER_IDENTITY` | `false` by default; set `true` to block approving an unverified shop |
+
+Identity verification reuses `STRIPE_SECRET_KEY`. There is no separate key.
+
+Two things have to be done outside this repo:
+
+1. **R2 CORS.** The browser PUTs directly to the bucket, so the bucket must
+   allow it. In the R2 dashboard, add a CORS rule permitting `PUT` from
+   `https://www.neighborhoodcandylady.com` with the `Content-Type` header.
+   Without this, uploads fail in the browser and nowhere else.
+2. **Stripe webhook events.** Add `identity.verification_session.verified`,
+   `.requires_input` and `.canceled` to the existing webhook endpoint. This is
+   optional: `POST /identity/refresh` pulls the verdict on demand, so
+   verification still completes with no webhook configured. It just means a
+   seller who closes the tab early has to reopen the page for the result.
+
+Nothing about a seller's ID document or selfie is stored here. Stripe collects
+both, performs the face match, and returns a verdict; what lands in Postgres is
+a status, a `vs_…` session id, and a timestamp.
+
 ### Vercel
 
 Nothing to configure. The frontend reads the publishable key, Stripe mode, and

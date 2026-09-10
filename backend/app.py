@@ -9,7 +9,9 @@ from sqlalchemy import func
 from werkzeug.exceptions import HTTPException
 
 import accounts
+import identity
 import payments
+import storage
 from auth import (
     assert_order_access,
     assert_seller_access,
@@ -26,11 +28,13 @@ from models import (
     FULFILLABLE_PAYMENT_STATUSES,
     INVENTORY_STATUSES,
     ORDER_STATUSES,
+    PHOTO_STATUSES,
     Candy,
     Order,
     OrderItem,
     Seller,
     SellerInventory,
+    SellerPhoto,
     User,
     db,
     generate_pickup_code,
@@ -48,6 +52,13 @@ def _env_float(name, default):
         return float(os.environ.get(name, default))
     except (TypeError, ValueError):
         return float(default)
+
+
+def _env_bool(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _env_int(name, default):
@@ -116,6 +127,29 @@ def create_app(config_overrides=None):
     app.config["PLATFORM_FEE_FLAT_CENTS"] = _env_int("PLATFORM_FEE_FLAT_CENTS", 0)
     app.config["CHECKOUT_SESSION_TTL_MINUTES"] = _env_int("CHECKOUT_SESSION_TTL_MINUTES", 31)
     app.config["PENDING_ORDER_TTL_MINUTES"] = _env_int("PENDING_ORDER_TTL_MINUTES", 45)
+
+    # Image storage. Any S3-compatible bucket works; Cloudflare R2 is what this
+    # was written against. Leaving these unset simply disables uploads -- the
+    # rest of the marketplace keeps working, and /config tells the frontend to
+    # hide the upload controls rather than offer a button that cannot succeed.
+    app.config["STORAGE_ENDPOINT_URL"] = os.environ.get("STORAGE_ENDPOINT_URL", "")
+    app.config["STORAGE_BUCKET"] = os.environ.get("STORAGE_BUCKET", "")
+    app.config["STORAGE_ACCESS_KEY_ID"] = os.environ.get("STORAGE_ACCESS_KEY_ID", "")
+    app.config["STORAGE_SECRET_ACCESS_KEY"] = os.environ.get(
+        "STORAGE_SECRET_ACCESS_KEY", ""
+    )
+    app.config["STORAGE_REGION"] = os.environ.get("STORAGE_REGION", "auto")
+    app.config["STORAGE_PUBLIC_BASE_URL"] = os.environ.get("STORAGE_PUBLIC_BASE_URL", "")
+    app.config["MAX_UPLOAD_BYTES"] = _env_int(
+        "MAX_UPLOAD_BYTES", storage.DEFAULT_MAX_UPLOAD_BYTES
+    )
+    app.config["MAX_SELLER_PHOTOS"] = _env_int("MAX_SELLER_PHOTOS", 12)
+
+    # Off by default so this deploy does not lock out the shops that are
+    # already approved. Turn it on before launch to require that a shop's owner
+    # has passed Stripe Identity before an admin can approve them.
+    app.config["REQUIRE_SELLER_IDENTITY"] = _env_bool("REQUIRE_SELLER_IDENTITY", False)
+
     app.config["RUN_MIGRATIONS_ON_BOOT"] = True
 
     if config_overrides:
@@ -304,6 +338,13 @@ def register_routes(app):
         """Non-secret settings the static frontend needs at runtime."""
         config = payments.public_config()
         config["public_site_url"] = app.config["PUBLIC_SITE_URL"]
+        # The frontend uses these to decide whether to show upload and
+        # verification controls at all, so a half-configured deploy degrades to
+        # a missing button instead of one that always fails.
+        config["uploads_enabled"] = storage.is_configured(app.config)
+        config["max_upload_bytes"] = storage.max_upload_bytes(app.config)
+        config["accepted_image_types"] = sorted(storage.ALLOWED_CONTENT_TYPES)
+        config["identity_enabled"] = identity.identity_enabled()
         return jsonify(config)
 
     # ------------------------------------------------------------------
@@ -579,11 +620,350 @@ def register_routes(app):
         if status not in ("approved", "rejected"):
             abort(400, description="status must be approved or rejected")
 
+        # Once this is switched on, a shop cannot go live until the person
+        # behind it has passed an ID check. Rejection is always allowed: there
+        # is no reason to make an admin verify someone in order to turn them
+        # down.
+        if (
+            status == "approved"
+            and app.config["REQUIRE_SELLER_IDENTITY"]
+            and not seller.identity_verified
+        ):
+            abort(
+                409,
+                description=(
+                    "this shop's owner has not completed identity verification yet"
+                ),
+            )
+
         seller.status = status
         db.session.commit()
         if status == "approved":
             ensure_seller_inventory_rows(seller.id)
         return jsonify(seller.to_dict(include_contact_email=True))
+
+    # ------------------------------------------------------------------
+    # Image uploads
+    #
+    # The browser uploads straight to the bucket. This API only signs the
+    # request beforehand and checks what landed afterwards, so a 4MB phone
+    # photo never occupies a request worker on the free tier.
+    # ------------------------------------------------------------------
+    def require_storage():
+        if not storage.is_configured(app.config):
+            abort(503, description="Photo uploads are not configured on this server.")
+
+    def validate_upload_request(data):
+        """Shared checks for signing and for confirming."""
+        content_type = (data.get("content_type") or "").split(";")[0].strip().lower()
+        if content_type not in storage.ALLOWED_CONTENT_TYPES:
+            abort(
+                400,
+                description=(
+                    "photos must be JPEG, PNG or WebP "
+                    f"(got {content_type or 'nothing'})"
+                ),
+            )
+        return content_type
+
+    @app.route("/uploads/sign", methods=["POST"])
+    @require_roles()
+    def sign_upload():
+        """Hand back a short-lived URL the browser can PUT one image to.
+
+        Authorization happens here rather than at confirm time: the key embeds
+        the requesting account, and the URL only permits that one key.
+        """
+        require_storage()
+        user = current_user()
+        data = request.get_json() or {}
+
+        purpose = (data.get("purpose") or "").strip()
+        if purpose not in storage.PURPOSES:
+            abort(400, description=f"purpose must be one of: {', '.join(storage.PURPOSES)}")
+        content_type = validate_upload_request(data)
+
+        limit = storage.max_upload_bytes(app.config)
+        try:
+            byte_size = int(data.get("byte_size") or 0)
+        except (TypeError, ValueError):
+            byte_size = 0
+        if byte_size <= 0:
+            abort(400, description="byte_size is required")
+        if byte_size > limit:
+            abort(413, description=f"photos must be smaller than {limit // (1024 * 1024)}MB")
+
+        # Only a seller or an admin has a shop to put candy photos on. Profile
+        # photos belong to whoever is asking, buyer or seller alike.
+        if purpose == "candy_photo" and user.role not in ("seller", "admin"):
+            abort(403, description="only a shop can upload candy photos")
+
+        key = storage.build_object_key(purpose, user.id, content_type)
+        try:
+            signed = storage.create_upload_url(app.config, key, content_type)
+        except storage.StorageNotConfigured:
+            abort(503, description="Photo uploads are not configured on this server.")
+        signed["content_type"] = content_type
+        return jsonify(signed), 201
+
+    def confirm_uploaded_object(key, content_type):
+        """Re-read the object and reject anything that does not match.
+
+        Without this, a client could confirm a key it never wrote, or write
+        something far larger than it declared, since a presigned PUT cannot
+        constrain length. Anything that fails here is deleted rather than left
+        to sit in the bucket.
+        """
+        require_storage()
+        if not key or not isinstance(key, str):
+            abort(400, description="key is required")
+        verified = storage.verify_uploaded_object(
+            app.config, key, content_type, storage.max_upload_bytes(app.config)
+        )
+        if verified is None:
+            storage.delete_object(app.config, key)
+            abort(400, description="that upload could not be verified; try again")
+        return verified
+
+    def assert_key_belongs_to(key, purpose, user):
+        """Keys are minted per account, so this catches a confirm that replays
+        someone else's key."""
+        expected_prefix = f"{purpose}/"
+        if not key.startswith(expected_prefix):
+            abort(400, description="that upload does not match this request")
+        if not key.rsplit("/", 1)[-1].startswith(f"{user.id}-"):
+            abort(403, description="that upload belongs to another account")
+
+    @app.route("/sellers/<int:seller_id>/photos", methods=["GET"])
+    @require_roles("seller", "admin")
+    def list_seller_photos(seller_id):
+        """Everything the shop has uploaded, including what is still waiting on
+        review. The public storefront only ever sees approved ones."""
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        photos = sorted(seller.photos, key=lambda photo: photo.id, reverse=True)
+        return jsonify([photo.to_dict() for photo in photos])
+
+    @app.route("/sellers/<int:seller_id>/photos", methods=["POST"])
+    @require_roles("seller", "admin")
+    def create_seller_photo(seller_id):
+        user = current_user()
+        assert_seller_access(user, seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+
+        data = request.get_json() or {}
+        content_type = validate_upload_request(data)
+        key = data.get("key")
+        assert_key_belongs_to(key or "", "candy_photo", user)
+
+        limit = app.config["MAX_SELLER_PHOTOS"]
+        if len(seller.photos) >= limit:
+            abort(409, description=f"a shop can hold at most {limit} photos")
+        if SellerPhoto.query.filter_by(object_key=key).first():
+            abort(409, description="that photo has already been added")
+
+        candy_id = data.get("candy_id")
+        if candy_id is not None:
+            Candy.query.get_or_404(int(candy_id))
+
+        verified = confirm_uploaded_object(key, content_type)
+        photo = SellerPhoto(
+            seller_id=seller.id,
+            candy_id=int(candy_id) if candy_id is not None else None,
+            object_key=verified["key"],
+            content_type=verified["content_type"],
+            byte_size=verified["byte_size"],
+            caption=(data.get("caption") or "").strip()[:200] or None,
+            status="pending",
+        )
+        db.session.add(photo)
+        db.session.commit()
+        return jsonify(photo.to_dict()), 201
+
+    @app.route("/sellers/<int:seller_id>/photos/<int:photo_id>", methods=["DELETE"])
+    @require_roles("seller", "admin")
+    def delete_seller_photo(seller_id, photo_id):
+        assert_seller_access(current_user(), seller_id)
+        photo = SellerPhoto.query.filter_by(id=photo_id, seller_id=seller_id).first_or_404()
+        key = photo.object_key
+        db.session.delete(photo)
+        db.session.commit()
+        storage.delete_object(app.config, key)
+        return "", 204
+
+    @app.route("/sellers/<int:seller_id>/profile-photo", methods=["PUT"])
+    @require_roles("seller", "admin")
+    def set_seller_profile_photo(seller_id):
+        """The face buyers see on the storefront. Not the Stripe selfie."""
+        user = current_user()
+        assert_seller_access(user, seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+
+        data = request.get_json() or {}
+        content_type = validate_upload_request(data)
+        key = data.get("key")
+        assert_key_belongs_to(key or "", "profile_photo", user)
+        verified = confirm_uploaded_object(key, content_type)
+
+        previous_key = seller.profile_photo_key
+        seller.profile_photo_key = verified["key"]
+        # A replacement goes back through review; otherwise an approved photo
+        # could be swapped for anything after the fact.
+        seller.profile_photo_status = "pending"
+        db.session.commit()
+        if previous_key and previous_key != verified["key"]:
+            storage.delete_object(app.config, previous_key)
+        return jsonify(seller.to_dict(include_contact_email=True))
+
+    @app.route("/me/photo", methods=["PUT"])
+    @require_roles()
+    def set_my_photo():
+        user = current_user()
+        data = request.get_json() or {}
+        content_type = validate_upload_request(data)
+        key = data.get("key")
+        assert_key_belongs_to(key or "", "profile_photo", user)
+        verified = confirm_uploaded_object(key, content_type)
+
+        previous_key = user.photo_key
+        user.photo_key = verified["key"]
+        user.photo_status = "pending"
+        db.session.commit()
+        if previous_key and previous_key != verified["key"]:
+            storage.delete_object(app.config, previous_key)
+        return jsonify(user.to_dict())
+
+    # ------------------------------------------------------------------
+    # Photo moderation
+    # ------------------------------------------------------------------
+    @app.route("/admin/photos", methods=["GET"])
+    @require_roles("admin")
+    def list_photos_for_review():
+        status = request.args.get("status", "pending")
+        if status not in PHOTO_STATUSES:
+            abort(400, description="invalid photo status")
+        photos = (
+            SellerPhoto.query.filter_by(status=status).order_by(SellerPhoto.id.asc()).all()
+        )
+        return jsonify(
+            [
+                dict(photo.to_dict(), shop_name=photo.seller.shop_name if photo.seller else None)
+                for photo in photos
+            ]
+        )
+
+    @app.route("/admin/photos/<int:photo_id>", methods=["PUT"])
+    @require_roles("admin")
+    def review_photo(photo_id):
+        photo = SellerPhoto.query.get_or_404(photo_id)
+        data = request.get_json() or {}
+        status = data.get("status")
+        if status not in ("approved", "rejected"):
+            abort(400, description="status must be approved or rejected")
+
+        photo.status = status
+        photo.reviewed_at = utcnow()
+        photo.reviewed_by_user_id = current_user().id
+        photo.rejection_reason = (data.get("rejection_reason") or "").strip()[:300] or None
+        db.session.commit()
+
+        # A rejected image has no reason to stay in the bucket. The row remains
+        # so the seller can see it was reviewed and why.
+        if status == "rejected":
+            storage.delete_object(app.config, photo.object_key)
+        return jsonify(photo.to_dict())
+
+    @app.route("/admin/sellers/<int:seller_id>/profile-photo", methods=["PUT"])
+    @require_roles("admin")
+    def review_seller_profile_photo(seller_id):
+        seller = Seller.query.get_or_404(seller_id)
+        data = request.get_json() or {}
+        status = data.get("status")
+        if status not in ("approved", "rejected"):
+            abort(400, description="status must be approved or rejected")
+        seller.profile_photo_status = status
+        db.session.commit()
+        if status == "rejected" and seller.profile_photo_key:
+            storage.delete_object(app.config, seller.profile_photo_key)
+            seller.profile_photo_key = None
+            db.session.commit()
+        return jsonify(seller.to_dict(include_contact_email=True))
+
+    # ------------------------------------------------------------------
+    # Identity verification
+    #
+    # The ID document and the selfie are collected by Stripe on its own hosted
+    # page and stay there. What lands here is a verdict.
+    # ------------------------------------------------------------------
+    def identity_payload(user):
+        return {
+            "identity_status": user.identity_status,
+            "identity_verified": user.identity_verified,
+            "identity_error": identity.friendly_error(user.identity_error_code),
+            "identity_verified_at": (
+                user.identity_verified_at.isoformat()
+                if user.identity_verified_at
+                else None
+            ),
+        }
+
+    def apply_identity_session(user, session):
+        """Write a Stripe verdict onto the account it belongs to."""
+        status = identity.map_status(session.get("status"))
+        user.identity_status = status
+        user.identity_session_id = session.get("id") or user.identity_session_id
+        if status == "verified":
+            user.identity_error_code = None
+            if user.identity_verified_at is None:
+                user.identity_verified_at = utcnow()
+        else:
+            user.identity_error_code = identity.error_code_from_session(session)
+        db.session.commit()
+        return status
+
+    @app.route("/identity/session", methods=["POST"])
+    @require_roles("seller", "admin")
+    def start_identity_verification():
+        user = current_user()
+        if user.identity_verified:
+            return jsonify(dict(identity_payload(user), url=None)), 200
+
+        # An abandoned session left open would keep returning its old verdict.
+        if user.identity_session_id and user.identity_status in (
+            identity.PROCESSING,
+            identity.REQUIRES_INPUT,
+        ):
+            identity.cancel_verification_session(user.identity_session_id)
+
+        return_url = f"{app.config['PUBLIC_SITE_URL']}/seller.html?identity=return"
+        session = identity.create_verification_session(user, return_url)
+        apply_identity_session(user, session)
+        return (
+            jsonify(dict(identity_payload(user), url=session.get("url"))),
+            201,
+        )
+
+    @app.route("/identity/status", methods=["GET"])
+    @require_roles()
+    def get_identity_status():
+        return jsonify(identity_payload(current_user()))
+
+    @app.route("/identity/refresh", methods=["POST"])
+    @require_roles()
+    def refresh_identity_status():
+        """Pull the verdict from Stripe on demand.
+
+        The webhook is the normal path, but it needs STRIPE_WEBHOOK_SECRET set
+        and a reachable endpoint. This is the authenticated fallback, the same
+        shape as the payment confirm path, so verification still completes on a
+        deploy with no webhook configured.
+        """
+        user = current_user()
+        if not user.identity_session_id:
+            return jsonify(identity_payload(user))
+        session = identity.retrieve_verification_session(user.identity_session_id)
+        apply_identity_session(user, session)
+        return jsonify(identity_payload(user))
 
     # ------------------------------------------------------------------
     # Storefronts
@@ -890,6 +1270,14 @@ def register_routes(app):
         )
         event_type = event.get("type")
         session = (event.get("data") or {}).get("object") or {}
+
+        # Identity events arrive on the same endpoint and the same signing
+        # secret, but they are about a person, not an order, so they branch
+        # before any order lookup.
+        if (event_type or "").startswith("identity.verification_session."):
+            handled = _apply_identity_event(session)
+            return jsonify(received=True, handled=handled)
+
         order = _order_for_session(session)
         if order is None:
             return jsonify(received=True, handled=False)
@@ -909,6 +1297,30 @@ def register_routes(app):
                 db.session.commit()
 
         return jsonify(received=True, handled=True)
+
+    def _apply_identity_event(event_object):
+        """Route a verification verdict to the account that started it.
+
+        Matched on our own metadata first, then on the stored session id, so a
+        session started before metadata existed still resolves.
+        """
+        metadata = event_object.get("metadata") or {}
+        user = None
+        user_id = metadata.get("user_id")
+        if user_id:
+            try:
+                user = User.query.get(int(user_id))
+            except (TypeError, ValueError):
+                user = None
+        if user is None and event_object.get("id"):
+            user = User.query.filter_by(
+                identity_session_id=event_object["id"]
+            ).first()
+        if user is None:
+            return False
+
+        apply_identity_session(user, event_object)
+        return True
 
     def _order_for_session(event_object):
         """Find the order behind a webhook payload.

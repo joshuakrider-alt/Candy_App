@@ -11,7 +11,15 @@ import logging
 from sqlalchemy import MetaData, inspect, text
 from sqlalchemy.schema import CreateTable
 
-from models import ROLES, Order, Seller, User, db
+from models import (
+    IDENTITY_STATUSES,
+    PHOTO_STATUSES,
+    ROLES,
+    Order,
+    Seller,
+    User,
+    db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +44,17 @@ NEW_COLUMNS = (
     ("order", "stripe_payment_intent_id", "VARCHAR(255)"),
     ("order", "paid_at", "TIMESTAMP"),
     ("order", "inventory_released_at", "TIMESTAMP"),
+    # Photo uploads and Stripe Identity. New images default to 'pending' so
+    # that anything already in flight when this deploys stays hidden until an
+    # admin looks at it, rather than appearing on the storefront unreviewed.
+    ("user", "photo_key", "VARCHAR(500)"),
+    ("user", "photo_status", "VARCHAR(20) NOT NULL DEFAULT 'pending'"),
+    ("user", "identity_status", "VARCHAR(20) NOT NULL DEFAULT 'unstarted'"),
+    ("user", "identity_session_id", "VARCHAR(255)"),
+    ("user", "identity_verified_at", "TIMESTAMP"),
+    ("user", "identity_error_code", "VARCHAR(100)"),
+    ("seller", "profile_photo_key", "VARCHAR(500)"),
+    ("seller", "profile_photo_status", "VARCHAR(20) NOT NULL DEFAULT 'pending'"),
 )
 
 
@@ -63,7 +82,7 @@ def run_migrations():
 
     _relax_order_user_id_not_null(existing_tables)
     _backfill(existing_tables, added)
-    _ensure_user_role_check_constraint(existing_tables)
+    _ensure_check_constraints(existing_tables)
     return added
 
 
@@ -156,44 +175,94 @@ def _rebuild_sqlite_order_table():
             connection.execute(text("PRAGMA foreign_keys=ON"))
 
 
+def _quoted_values(values):
+    return ", ".join(f"'{value}'" for value in values)
+
+
+def _check_constraints():
+    """Every CHECK this file is responsible for adding after the fact.
+
+    Columns added by NEW_COLUMNS land on tables that already exist, so they
+    arrive with nothing but the API layer policing their values. These put the
+    same rule in the database.
+    """
+    return (
+        ("user", USER_ROLE_CONSTRAINT, f"role IN ({_quoted_values(ROLES)})"),
+        (
+            "user",
+            "ck_user_photo_status",
+            f"photo_status IN ({_quoted_values(PHOTO_STATUSES)})",
+        ),
+        (
+            "user",
+            "ck_user_identity_status",
+            f"identity_status IN ({_quoted_values(IDENTITY_STATUSES)})",
+        ),
+        (
+            "seller",
+            "ck_seller_profile_photo_status",
+            f"profile_photo_status IN ({_quoted_values(PHOTO_STATUSES)})",
+        ),
+    )
+
+
 def _ensure_user_role_check_constraint(existing_tables):
-    """Add ck_user_role to a `user` table that was created without it.
+    """The role constraint on its own.
+
+    Kept as a named entry point because it is the one constraint with its own
+    regression test, and because it is the one that guards a security-relevant
+    column rather than a display field.
+    """
+    return _ensure_check_constraint(
+        existing_tables, "user", USER_ROLE_CONSTRAINT, f"role IN ({_quoted_values(ROLES)})"
+    )
+
+
+def _ensure_check_constraints(existing_tables):
+    applied = set()
+    for table, name, expression in _check_constraints():
+        if _ensure_check_constraint(existing_tables, table, name, expression):
+            applied.add(name)
+    return applied
+
+
+def _ensure_check_constraint(existing_tables, table, name, expression):
+    """Add one CHECK to a table that was created without it.
 
     `db.create_all()` only attaches check constraints to tables it creates, so
-    the Neon `user` table predates the constraint and would never get one.
-    SQLite cannot add a constraint to an existing table, so this is a no-op
-    there; the model definition already covers freshly created databases.
+    the Neon tables predate these and would never get them. SQLite cannot add a
+    constraint to an existing table, so this is a no-op there; the model
+    definitions already cover freshly created databases.
     """
-    if db.engine.dialect.name != "postgresql" or "user" not in existing_tables:
+    if db.engine.dialect.name != "postgresql" or table not in existing_tables:
         return False
 
-    allowed = ", ".join(f"'{role}'" for role in ROLES)
     try:
         with db.engine.begin() as connection:
             already_applied = connection.execute(
                 text(
                     "SELECT 1 FROM pg_constraint constraint_row "
                     "JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid "
-                    "WHERE constraint_row.conname = :name AND table_row.relname = 'user'"
+                    "WHERE constraint_row.conname = :name AND table_row.relname = :table"
                 ),
-                {"name": USER_ROLE_CONSTRAINT},
+                {"name": name, "table": table},
             ).first()
             if already_applied:
                 return False
             connection.execute(
                 text(
-                    f"ALTER TABLE {_quote('user')} "
-                    f"ADD CONSTRAINT {_quote(USER_ROLE_CONSTRAINT)} "
-                    f"CHECK (role IN ({allowed}))"
+                    f"ALTER TABLE {_quote(table)} "
+                    f"ADD CONSTRAINT {_quote(name)} "
+                    f"CHECK ({expression})"
                 )
             )
     except Exception:  # pragma: no cover - depends on existing rows and grants
-        # A row with an unexpected role would fail the ALTER. Log it instead of
-        # blocking boot; every write path already validates the role.
-        logger.warning("migration: could not add %s", USER_ROLE_CONSTRAINT, exc_info=True)
+        # A row holding an unexpected value would fail the ALTER. Log it instead
+        # of blocking boot; every write path already validates these fields.
+        logger.warning("migration: could not add %s", name, exc_info=True)
         return False
 
-    logger.info("migration: added %s", USER_ROLE_CONSTRAINT)
+    logger.info("migration: added %s", name)
     return True
 
 
