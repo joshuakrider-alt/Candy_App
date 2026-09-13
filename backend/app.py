@@ -89,6 +89,14 @@ def create_app(config_overrides=None):
     app = Flask(__name__)
     app.config["SQLALCHEMY_DATABASE_URI"] = resolve_database_url()
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    # Neon suspends its compute after a few idle minutes and drops any
+    # connections SQLAlchemy is still holding open. Without pre_ping, the
+    # first request after a suspend reuses the dead connection and dies with
+    # "SSL connection has been closed unexpectedly" instead of reconnecting.
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,
+    }
     app.config["JWT_SECRET_KEY"] = os.environ.get(
         "JWT_SECRET_KEY",
         "dev-candy-jwt-secret-change-me-please",
