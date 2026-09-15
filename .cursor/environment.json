@@ -1,0 +1,15 @@
+{
+  "name": "The Candy Lady",
+  "install": "cd backend && (sudo apt-get update -qq && sudo apt-get install -y -qq python3.12-venv || true) && python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.txt pytest && SEED_ADMIN_PASSWORD=demo-admin-pass SEED_SELLER_PASSWORD=demo-seller-pass SEED_BUYER_PASSWORD=demo-buyer-pass .venv/bin/python manage.py init-db && SEED_ADMIN_PASSWORD=demo-admin-pass SEED_SELLER_PASSWORD=demo-seller-pass SEED_BUYER_PASSWORD=demo-buyer-pass .venv/bin/python manage.py seed-demo",
+  "terminals": [
+    {
+      "name": "api",
+      "command": "cd backend && CORS_ORIGINS=http://localhost:5500 PUBLIC_SITE_URL=http://localhost:5500 .venv/bin/python app.py"
+    },
+    {
+      "name": "frontend",
+      "command": "python3 -m http.server 5500"
+    }
+  ],
+  "ports": [5000, 5500]
+}
