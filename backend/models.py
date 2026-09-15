@@ -18,6 +18,23 @@ ROLES = ("buyer", "seller", "admin")
 INVENTORY_STATUSES = ("in-stock", "low-stock", "out-of-stock")
 ORDER_STATUSES = ("new", "packing", "ready", "completed")
 
+# Every uploaded image starts hidden. Buyers here include children, the photos
+# are shown publicly on a storefront, and no automated check can decide whether
+# a picture is a bag of sour gummies or something that must never appear on the
+# site. A person approves each one before anybody else can see it.
+PHOTO_STATUSES = ("pending", "approved", "rejected")
+
+# Mirrors identity.IDENTITY_STATUSES. Duplicated as a plain tuple so models.py
+# stays importable without Stripe installed (the test suite and migrations both
+# rely on that).
+IDENTITY_STATUSES = (
+    "unstarted",
+    "processing",
+    "requires_input",
+    "verified",
+    "canceled",
+)
+
 # "pay_at_pickup" only exists for orders created before online payment shipped.
 PAYMENT_STATUSES = (
     "unpaid",
@@ -48,12 +65,40 @@ def generate_pickup_code():
     return f"CL-{body}"
 
 
+def photo_url_for(key):
+    """Public URL for a stored image, or None if it cannot be built.
+
+    Imported lazily so models.py stays usable without an application context
+    and without boto3 present -- migrations and several tests import this
+    module before either exists.
+    """
+    if not key:
+        return None
+    try:
+        from flask import current_app
+
+        from storage import public_url
+
+        return public_url(current_app.config, key)
+    except Exception:
+        return None
+
+
 class User(db.Model):
     __tablename__ = "user"
     __table_args__ = (
         db.CheckConstraint(
             "role IN ('buyer', 'seller', 'admin')",
             name="ck_user_role",
+        ),
+        db.CheckConstraint(
+            "photo_status IN ('pending', 'approved', 'rejected')",
+            name="ck_user_photo_status",
+        ),
+        db.CheckConstraint(
+            "identity_status IN ('unstarted', 'processing', 'requires_input', "
+            "'verified', 'canceled')",
+            name="ck_user_identity_status",
         ),
     )
 
@@ -66,8 +111,25 @@ class User(db.Model):
     seller_id = db.Column(db.Integer, db.ForeignKey("seller.id"))
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
+    # Optional avatar, for buyers and sellers alike. Moderated like any other
+    # uploaded image; an unapproved one is simply not shown.
+    photo_key = db.Column(db.String(500))
+    photo_status = db.Column(db.String(20), nullable=False, default="pending")
+
+    # Stripe Identity verdict for this person. The ID document and the selfie
+    # live in Stripe and are never copied here -- see identity.py for why.
+    # identity_session_id is a Stripe object id (vs_...), not personal data.
+    identity_status = db.Column(db.String(20), nullable=False, default="unstarted")
+    identity_session_id = db.Column(db.String(255))
+    identity_verified_at = db.Column(db.DateTime)
+    identity_error_code = db.Column(db.String(100))
+
     orders = db.relationship("Order", back_populates="user", lazy=True)
     seller = db.relationship("Seller", back_populates="logins")
+
+    @property
+    def identity_verified(self):
+        return self.identity_status == "verified"
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
@@ -89,6 +151,12 @@ class User(db.Model):
             "role": self.role,
             "seller_id": self.seller_id,
             "has_password": self.has_password,
+            "photo_url": photo_url_for(self.photo_key)
+            if self.photo_status == "approved"
+            else None,
+            "photo_status": self.photo_status,
+            "identity_status": self.identity_status,
+            "identity_verified": self.identity_verified,
         }
 
 
@@ -98,6 +166,10 @@ class Seller(db.Model):
         db.CheckConstraint(
             "status IN ('pending', 'approved', 'rejected')",
             name="ck_seller_status",
+        ),
+        db.CheckConstraint(
+            "profile_photo_status IN ('pending', 'approved', 'rejected')",
+            name="ck_seller_profile_photo_status",
         ),
     )
 
@@ -109,6 +181,11 @@ class Seller(db.Model):
     pickup_window = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), nullable=False, default="pending")
 
+    # The shopfront face: one photo of the person buyers will meet at pickup.
+    # Distinct from the selfie Stripe Identity takes, which stays at Stripe.
+    profile_photo_key = db.Column(db.String(500))
+    profile_photo_status = db.Column(db.String(20), nullable=False, default="pending")
+
     inventory_items = db.relationship(
         "SellerInventory",
         back_populates="seller",
@@ -117,8 +194,37 @@ class Seller(db.Model):
     )
     orders = db.relationship("Order", back_populates="seller", lazy=True)
     logins = db.relationship("User", back_populates="seller", lazy=True)
+    photos = db.relationship(
+        "SellerPhoto",
+        back_populates="seller",
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
 
-    def to_dict(self, include_contact_email=False):
+    @property
+    def owner(self):
+        """The login this shop belongs to, if it has one.
+
+        Applications create exactly one login per shop, so in practice this is
+        that person. Ordered by id so a shop that later gains a second login
+        keeps answering with the original owner rather than an arbitrary row.
+        """
+        logins = sorted(self.logins or [], key=lambda login: login.id)
+        return logins[0] if logins else None
+
+    @property
+    def identity_status(self):
+        owner = self.owner
+        return owner.identity_status if owner else "unstarted"
+
+    @property
+    def identity_verified(self):
+        return self.identity_status == "verified"
+
+    def approved_photos(self):
+        return [photo for photo in self.photos if photo.status == "approved"]
+
+    def to_dict(self, include_contact_email=False, include_photos=True):
         data = {
             "id": self.id,
             "shop_name": self.shop_name,
@@ -126,9 +232,19 @@ class Seller(db.Model):
             "neighborhood": self.neighborhood,
             "pickup_window": self.pickup_window,
             "status": self.status,
+            "profile_photo_url": photo_url_for(self.profile_photo_key)
+            if self.profile_photo_status == "approved"
+            else None,
+            # A buyer-visible trust signal. It says the person behind the shop
+            # passed an ID check, and nothing about who they are.
+            "identity_verified": self.identity_verified,
         }
+        if include_photos:
+            data["photos"] = [photo.to_dict() for photo in self.approved_photos()]
         if include_contact_email:
             data["contact_email"] = self.contact_email
+            data["profile_photo_status"] = self.profile_photo_status
+            data["identity_status"] = self.identity_status
         return data
 
 
@@ -199,6 +315,53 @@ class SellerInventory(db.Model):
             "inventory_count": self.inventory_count,
             "status": self.status,
             "candy": self.candy.to_dict() if self.candy else None,
+        }
+
+
+class SellerPhoto(db.Model):
+    """One seller-uploaded picture of what is on their shelf.
+
+    The image itself lives in object storage; this row is the record of it, and
+    `status` is what decides whether anyone but the seller and an admin ever
+    sees it.
+    """
+
+    __tablename__ = "seller_photo"
+    __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')",
+            name="ck_seller_photo_status",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    seller_id = db.Column(db.Integer, db.ForeignKey("seller.id"), nullable=False)
+    # Optional: which catalog item this is a picture of. A shop can also post
+    # a general shelf shot that is not tied to one candy.
+    candy_id = db.Column(db.Integer, db.ForeignKey("candy.id"))
+    object_key = db.Column(db.String(500), nullable=False, unique=True)
+    content_type = db.Column(db.String(100), nullable=False)
+    byte_size = db.Column(db.Integer, nullable=False, default=0)
+    caption = db.Column(db.String(200))
+    status = db.Column(db.String(20), nullable=False, default="pending")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    reviewed_at = db.Column(db.DateTime)
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    rejection_reason = db.Column(db.String(300))
+
+    seller = db.relationship("Seller", back_populates="photos")
+    candy = db.relationship("Candy")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "seller_id": self.seller_id,
+            "candy_id": self.candy_id,
+            "url": photo_url_for(self.object_key),
+            "caption": self.caption,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "rejection_reason": self.rejection_reason,
         }
 
 

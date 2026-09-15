@@ -156,6 +156,99 @@ const api = async (path, { method = "GET", body, auth = false } = {}) => {
 };
 
 /* ------------------------------------------------------------------ */
+/* Image uploads                                                      */
+/*                                                                    */
+/* Photos go straight from the browser to the storage bucket. The API */
+/* only signs the request and records the result, so a phone photo    */
+/* never travels through it.                                          */
+/* ------------------------------------------------------------------ */
+
+const UPLOAD_MAX_DIMENSION = 1600;
+const UPLOAD_JPEG_QUALITY = 0.85;
+
+const readImage = (file) =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("That file could not be read as an image."));
+    };
+    image.src = url;
+  });
+
+/* Re-encode through a canvas before uploading.
+ *
+ * This is mostly a privacy step, not a size one. A photo taken on a phone
+ * carries EXIF metadata, and for a seller photographing candy on their own
+ * kitchen table that metadata usually includes the GPS coordinates of their
+ * house. Publishing the original file would put every seller's home address on
+ * the storefront for anyone who knows how to read a JPEG header. Drawing the
+ * image onto a canvas and re-encoding keeps the pixels and discards everything
+ * else. Downscaling to a sane width is the useful side effect: a 4MB photo
+ * lands around 300KB, which matters on a phone plan.
+ *
+ * This is not a security control. Anything the browser sends can be forged, so
+ * the API re-checks type and size, and a person still reviews every image
+ * before it is public.
+ */
+const prepareImageForUpload = async (file) => {
+  if (!file || !file.type.startsWith("image/")) {
+    throw new Error("Pick an image file.");
+  }
+  const image = await readImage(file);
+  const scale = Math.min(
+    1,
+    UPLOAD_MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight)
+  );
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(image.naturalWidth * scale);
+  canvas.height = Math.round(image.naturalHeight * scale);
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (result) =>
+        result ? resolve(result) : reject(new Error("That image could not be processed.")),
+      "image/jpeg",
+      UPLOAD_JPEG_QUALITY
+    )
+  );
+  return { blob, contentType: "image/jpeg" };
+};
+
+/* Sign, upload, and hand back the key for the caller to confirm. */
+const uploadImage = async (file, purpose) => {
+  const { blob, contentType } = await prepareImageForUpload(file);
+
+  const signed = await api("/uploads/sign", {
+    method: "POST",
+    auth: true,
+    body: { purpose, content_type: contentType, byte_size: blob.size },
+  });
+
+  let response;
+  try {
+    response = await fetch(signed.upload_url, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: blob,
+    });
+  } catch {
+    throw new Error("The photo could not be uploaded. Check your connection.");
+  }
+  if (!response.ok) {
+    throw new Error(`The photo could not be stored (${response.status}).`);
+  }
+  return { key: signed.key, content_type: contentType };
+};
+
+/* ------------------------------------------------------------------ */
 /* Login gate for the seller and admin dashboards                     */
 /* ------------------------------------------------------------------ */
 
@@ -1189,11 +1282,235 @@ if (sellerApp) {
     }
   });
 
+  /* ---------------------------------------------------------------- */
+  /* Shop photos                                                      */
+  /* ---------------------------------------------------------------- */
+
+  const photosSection = sellerApp.querySelector("[data-photos-section]");
+  const photoGrid = sellerApp.querySelector("[data-photo-grid]");
+  const photoMessage = sellerApp.querySelector("[data-photo-message]");
+  const candyPhotoInput = sellerApp.querySelector("[data-candy-photo-input]");
+  const profilePhotoInput = sellerApp.querySelector("[data-profile-photo-input]");
+  const profilePhotoStatus = sellerApp.querySelector("[data-profile-photo-status]");
+
+  const identitySection = sellerApp.querySelector("[data-identity-section]");
+  const identityStatusText = sellerApp.querySelector("[data-identity-status]");
+  const identityMessage = sellerApp.querySelector("[data-identity-message]");
+  const identityStartButton = sellerApp.querySelector("[data-identity-start]");
+
+  const PHOTO_STATUS_LABELS = {
+    pending: "Waiting on review",
+    approved: "Live on your shop",
+    rejected: "Not accepted",
+  };
+
+  const IDENTITY_LABELS = {
+    unstarted: "Not started",
+    processing: "Stripe is checking…",
+    requires_input: "Needs another try",
+    verified: "Verified",
+    canceled: "Cancelled",
+  };
+
+  const renderPhotos = (photos) => {
+    if (!photos.length) {
+      photoGrid.innerHTML = '<p class="empty-state">No photos yet.</p>';
+      return;
+    }
+    photoGrid.innerHTML = photos
+      .map(
+        (photo) => `
+          <article class="app-panel">
+            ${
+              photo.url
+                ? `<img src="${escapeHtml(photo.url)}" alt="${escapeHtml(
+                    photo.caption || "Snack photo"
+                  )}" style="width:100%;border-radius:12px;" />`
+                : '<p class="empty-state">Image unavailable</p>'
+            }
+            <p class="card-label">${escapeHtml(
+              PHOTO_STATUS_LABELS[photo.status] || photo.status
+            )}</p>
+            ${
+              photo.rejection_reason
+                ? `<p class="order-message">${escapeHtml(photo.rejection_reason)}</p>`
+                : ""
+            }
+            <button class="soft-action" type="button" data-delete-photo="${photo.id}">
+              Remove
+            </button>
+          </article>
+        `
+      )
+      .join("");
+  };
+
+  const loadPhotos = async () => {
+    if (!sellerId) return;
+    try {
+      renderPhotos(await api(`/sellers/${sellerId}/photos`, { auth: true }));
+    } catch (error) {
+      photoGrid.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    }
+  };
+
+  const withUploadFeedback = async (input, working, run) => {
+    photoMessage.textContent = working;
+    input.disabled = true;
+    try {
+      await run();
+    } catch (error) {
+      photoMessage.textContent = error.message || "That upload did not work.";
+    } finally {
+      input.disabled = false;
+      input.value = "";
+    }
+  };
+
+  if (candyPhotoInput) {
+    candyPhotoInput.addEventListener("change", async () => {
+      const file = candyPhotoInput.files?.[0];
+      if (!file) return;
+      await withUploadFeedback(candyPhotoInput, "Uploading photo…", async () => {
+        const uploaded = await uploadImage(file, "candy_photo");
+        await api(`/sellers/${sellerId}/photos`, {
+          method: "POST",
+          auth: true,
+          body: uploaded,
+        });
+        photoMessage.textContent = "Uploaded. An admin will review it shortly.";
+        loadPhotos();
+      });
+    });
+  }
+
+  if (profilePhotoInput) {
+    profilePhotoInput.addEventListener("change", async () => {
+      const file = profilePhotoInput.files?.[0];
+      if (!file) return;
+      await withUploadFeedback(profilePhotoInput, "Uploading your photo…", async () => {
+        const uploaded = await uploadImage(file, "profile_photo");
+        const seller = await api(`/sellers/${sellerId}/profile-photo`, {
+          method: "PUT",
+          auth: true,
+          body: uploaded,
+        });
+        profilePhotoStatus.textContent =
+          PHOTO_STATUS_LABELS[seller.profile_photo_status] || "Waiting on review";
+        photoMessage.textContent = "Uploaded. An admin will review it shortly.";
+      });
+    });
+  }
+
+  if (photoGrid) {
+    photoGrid.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-delete-photo]");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        await api(`/sellers/${sellerId}/photos/${button.dataset.deletePhoto}`, {
+          method: "DELETE",
+          auth: true,
+        });
+        loadPhotos();
+      } catch (error) {
+        photoMessage.textContent = error.message || "That photo could not be removed.";
+        button.disabled = false;
+      }
+    });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Identity verification                                            */
+  /* ---------------------------------------------------------------- */
+
+  const renderIdentity = (payload) => {
+    identityStatusText.textContent =
+      IDENTITY_LABELS[payload.identity_status] || payload.identity_status;
+    identityMessage.textContent = payload.identity_error || "";
+    if (payload.identity_verified) {
+      identityStartButton.hidden = true;
+    } else {
+      identityStartButton.hidden = false;
+      identityStartButton.textContent =
+        payload.identity_status === "unstarted"
+          ? "Verify with Stripe"
+          : "Try verification again";
+    }
+  };
+
+  const loadIdentity = async () => {
+    try {
+      renderIdentity(await api("/identity/status", { auth: true }));
+    } catch {
+      // A shop can still be run without this panel resolving.
+    }
+  };
+
+  if (identityStartButton) {
+    identityStartButton.addEventListener("click", async () => {
+      identityStartButton.disabled = true;
+      identityMessage.textContent = "Opening Stripe…";
+      try {
+        const payload = await api("/identity/session", { method: "POST", auth: true });
+        if (payload.url) {
+          window.location.href = payload.url;
+          return;
+        }
+        renderIdentity(payload);
+      } catch (error) {
+        identityMessage.textContent = error.message || "Verification could not start.";
+      } finally {
+        identityStartButton.disabled = false;
+      }
+    });
+  }
+
+  /* Stripe sends the seller back here when they finish. The webhook may not
+   * have landed yet (and needs a signing secret configured at all), so ask the
+   * API to pull the verdict directly before showing anything. */
+  const handleIdentityReturn = async () => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("identity") !== "return") return;
+    identityMessage.textContent = "Checking your verification…";
+    try {
+      renderIdentity(await api("/identity/refresh", { method: "POST", auth: true }));
+    } catch (error) {
+      identityMessage.textContent = error.message || "Could not check verification.";
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("identity");
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+  };
+
   initDashboardGate(sellerApp, {
     roles: ["seller", "admin"],
     wrongRoleMessage: "That account is not a seller. Use the shop or admin page instead.",
-    onReady: (me) => {
+    onReady: async (me) => {
       sellerId = me.user.seller_id;
+
+      // Only offer what this deployment can actually do: without a bucket the
+      // upload controls stay hidden rather than failing on submit.
+      try {
+        const config = await api("/config");
+        if (photosSection) photosSection.hidden = !config.uploads_enabled || !sellerId;
+        if (identitySection) identitySection.hidden = !config.identity_enabled;
+      } catch {
+        // Leave both hidden if the config call fails.
+      }
+      if (identitySection && !identitySection.hidden) {
+        await loadIdentity();
+        await handleIdentityReturn();
+      }
+      if (sellerId && photosSection && !photosSection.hidden) {
+        if (me.seller) {
+          profilePhotoStatus.textContent = me.seller.profile_photo_url
+            ? PHOTO_STATUS_LABELS.approved
+            : PHOTO_STATUS_LABELS[me.seller.profile_photo_status] || "None yet";
+        }
+        loadPhotos();
+      }
+
       if (!sellerId) {
         orderList.innerHTML =
           '<p class="empty-state">This account is not linked to a shop. An admin can link it with manage.py set-role.</p>';
@@ -1346,9 +1663,81 @@ if (adminApp) {
     }
   });
 
+  /* ---------------------------------------------------------------- */
+  /* Photo review queue                                               */
+  /* ---------------------------------------------------------------- */
+
+  const photoReviewSection = adminApp.querySelector("[data-photo-review-section]");
+  const photoReviewGrid = adminApp.querySelector("[data-photo-review-grid]");
+  const photoReviewMessage = adminApp.querySelector("[data-photo-review-message]");
+
+  const renderPhotoReview = (photos) => {
+    if (!photos.length) {
+      photoReviewGrid.innerHTML = '<p class="empty-state">Nothing waiting.</p>';
+      return;
+    }
+    photoReviewGrid.innerHTML = photos
+      .map(
+        (photo) => `
+          <article class="app-panel">
+            ${
+              photo.url
+                ? `<img src="${escapeHtml(photo.url)}" alt="Photo awaiting review"
+                     style="width:100%;border-radius:12px;" />`
+                : '<p class="empty-state">Image unavailable</p>'
+            }
+            <p class="card-label">${escapeHtml(photo.shop_name || "Unknown shop")}</p>
+            ${photo.caption ? `<p>${escapeHtml(photo.caption)}</p>` : ""}
+            <div class="row-actions">
+              <button class="mini-action" type="button"
+                data-review-photo="${photo.id}" data-review-status="approved">Approve</button>
+              <button class="soft-action" type="button"
+                data-review-photo="${photo.id}" data-review-status="rejected">Reject</button>
+            </div>
+          </article>
+        `
+      )
+      .join("");
+  };
+
+  const loadPhotoReview = async () => {
+    if (!photoReviewSection) return;
+    try {
+      const config = await api("/config");
+      photoReviewSection.hidden = !config.uploads_enabled;
+      if (photoReviewSection.hidden) return;
+      renderPhotoReview(await api("/admin/photos?status=pending", { auth: true }));
+    } catch (error) {
+      photoReviewGrid.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    }
+  };
+
+  if (photoReviewGrid) {
+    photoReviewGrid.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-review-photo]");
+      if (!button) return;
+      button.disabled = true;
+      photoReviewMessage.textContent = "";
+      try {
+        await api(`/admin/photos/${button.dataset.reviewPhoto}`, {
+          method: "PUT",
+          auth: true,
+          body: { status: button.dataset.reviewStatus },
+        });
+        loadPhotoReview();
+      } catch (error) {
+        photoReviewMessage.textContent = error.message || "That review did not save.";
+        button.disabled = false;
+      }
+    });
+  }
+
   initDashboardGate(adminApp, {
     roles: ["admin"],
     wrongRoleMessage: "That account is not an admin.",
-    onReady: loadAdminDashboard,
+    onReady: (me) => {
+      loadAdminDashboard(me);
+      loadPhotoReview();
+    },
   });
 }

@@ -113,6 +113,58 @@
           </aside>
         </section>
 
+        <section class="app-section reveal" data-identity-section hidden>
+          <div class="section-heading">
+            <p class="eyebrow">Trust &amp; safety</p>
+            <h2>Verify who you are</h2>
+          </div>
+          <p class="hero-text">
+            Buyers are handing money to a neighbour they may not know. A one-time
+            ID check puts a verified badge on your shop. Stripe runs the check and
+            keeps your ID and selfie — they are never stored on The Candy Lady.
+          </p>
+          <div class="profile-stack">
+            <div>
+              <span>Status</span><strong data-identity-status>Not started</strong>
+            </div>
+          </div>
+          <p class="order-message" data-identity-message role="status"></p>
+          <button class="primary-button dark" type="button" data-identity-start>
+            Verify with Stripe
+          </button>
+        </section>
+
+        <section class="app-section reveal" data-photos-section hidden>
+          <div class="section-heading">
+            <p class="eyebrow">Shop photos</p>
+            <h2>Show what's on your shelf</h2>
+          </div>
+          <p class="hero-text">
+            Real photos of your snacks help buyers pick. Every photo is checked by
+            an admin before it appears on your storefront.
+          </p>
+
+          <div class="profile-stack">
+            <div>
+              <span>Shop photo</span>
+              <strong data-profile-photo-status>None yet</strong>
+            </div>
+          </div>
+          <label class="form-field">
+            <span>Your shop photo (a picture of you)</span>
+            <input type="file" accept="image/*" data-profile-photo-input />
+          </label>
+
+          <label class="form-field">
+            <span>Add a snack photo</span>
+            <input type="file" accept="image/*" data-candy-photo-input />
+          </label>
+          <p class="order-message" data-photo-message role="status"></p>
+          <div class="inventory-grid" data-photo-grid>
+            <p class="empty-state">No photos yet.</p>
+          </div>
+        </section>
+
         <section class="app-section reveal">
           <div class="section-heading">
             <p class="eyebrow">Inventory controls</p>
