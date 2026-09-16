@@ -224,3 +224,47 @@ createdb candy_test
 TEST_DATABASE_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1/candy_test \
     python -m pytest tests -q
 ```
+
+## Dependencies
+
+`requirements.txt` is generated, not hand-edited. It pins the entire dependency
+tree — direct packages and everything they pull in — so that two deploys a month
+apart install identical bytes.
+
+This matters more here than it would elsewhere: the Render build cache is off, so
+every deploy resolves from PyPI afresh. Without pins, a redeploy that touched
+nothing could still install a different Flask than the one the tests ran against,
+and the resulting breakage would look like a bug in code that had not changed.
+
+To add or change a dependency, edit `requirements.in` (direct dependencies only),
+then regenerate:
+
+```
+uv pip compile requirements.in -o requirements.txt --python-version 3.9
+uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.9
+```
+
+`requirements-dev.txt` adds the test-only packages and is never installed on
+Render.
+
+### Python version
+
+`.python-version` at the repo root pins the interpreter. An unpinned Python is
+an unpinned dependency: Render's default tracks forward over time, and a service
+that silently moves from 3.9 to 3.14 between deploys is the same class of problem
+as an unpinned package.
+
+Note that a `PYTHON_VERSION` environment variable set in the Render dashboard
+**overrides this file**. If the two disagree, the dashboard wins and the repo
+lies about what production runs.
+
+### Verifying a change
+
+```
+uv venv --python 3.9 .venv
+uv pip install --python .venv -r backend/requirements-dev.txt
+.venv/bin/python -m pytest backend/tests -q
+```
+
+Run this against the same Python production uses, not whatever is on your
+machine. A suite that passes on 3.13 proves nothing about a 3.9 deploy.
