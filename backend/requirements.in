@@ -1,0 +1,17 @@
+# Direct dependencies only. Edit this file, never requirements.txt.
+#
+# Regenerate the pinned lockfile after any change here:
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.9
+#
+# Render installs requirements.txt, which pins the whole tree so that two
+# deploys a month apart install identical bytes. The build cache is off, so
+# every deploy re-resolves from PyPI -- without pins, that means every deploy
+# is a fresh roll of the dice on upstream releases.
+Flask
+Flask-SQLAlchemy
+Flask-JWT-Extended
+Flask-Cors
+gunicorn
+psycopg2-binary
+stripe
+boto3

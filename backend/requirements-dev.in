@@ -1,0 +1,6 @@
+# Test-only dependencies. Not installed on Render.
+#
+# Regenerate:
+#   uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.9
+-r requirements.in
+pytest

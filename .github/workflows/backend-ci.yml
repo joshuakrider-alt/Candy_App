@@ -1,0 +1,164 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Nothing here deploys, publishes or touches production. Read-only credentials
+# mean a pull request from anywhere cannot use this workflow to reach anything.
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The suite is run twice on purpose.
+    #
+    # SQLite is what runs on a laptop, and it leaves four tests skipped: the
+    # three Postgres migration tests and the user-role constraint test. Those
+    # cover migrations.py, which is the code that reaches into the production
+    # Neon database on every boot -- so on SQLite alone, the most dangerous code
+    # in the backend is the code with no coverage. Postgres un-skips them.
+    #
+    # Locally: SQLite gives 67 passed / 4 skipped, Postgres gives 69 passed /
+    # 2 skipped, and the two that remain are SQLite-only paths that correctly do
+    # not apply. Neither leg alone covers everything.
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: candytest
+        ports:
+          - 5432:5432
+        # Without a health check the tests can start before the server accepts
+        # connections, which fails as a confusing connection error rather than
+        # as "the database was not ready yet".
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Reads .python-version, so CI and Render cannot drift apart: the file
+      # that pins production also pins this. If a runner ever lacks that exact
+      # patch release, loosen .python-version to "3.9" rather than hard-coding a
+      # different version here, or the two will silently diverge again.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install pinned dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Run tests
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg2://postgres:postgres@localhost:5432/candytest' || '' }}
+        run: python -m pytest tests -q -rs
+
+  lockfile:
+    name: Lockfile is in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      # Pinning only helps while the lockfile still matches what it was
+      # generated from. Editing requirements.in and forgetting to recompile
+      # would leave a lockfile that quietly no longer reflects the intended
+      # dependencies, which is the failure pinning was meant to prevent.
+      - name: Check requirements.txt matches requirements.in
+        working-directory: backend
+        run: |
+          pip install uv
+          # Recompile onto copies of the committed lockfiles rather than into
+          # empty files. uv preserves pins that are already recorded and changes
+          # only what the .in file actually demands, so this asks "does the
+          # lockfile still describe these inputs" and not "has anything on PyPI
+          # released a new version since". The second question has the answer
+          # "yes" almost every day, and a check that is always red is a check
+          # everyone learns to ignore.
+          #
+          # Compiling under the same filenames also keeps uv's generated header
+          # identical, since it records the output path it was given.
+          rm -rf "${RUNNER_TEMP}/lockcheck"
+          mkdir -p "${RUNNER_TEMP}/lockcheck"
+          cp requirements.in requirements-dev.in requirements.txt requirements-dev.txt "${RUNNER_TEMP}/lockcheck/"
+          cd "${RUNNER_TEMP}/lockcheck"
+          uv pip compile requirements.in -o requirements.txt --python-version 3.9 --quiet
+          uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.9 --quiet
+          diff -u "${GITHUB_WORKSPACE}/backend/requirements.txt" requirements.txt
+          diff -u "${GITHUB_WORKSPACE}/backend/requirements-dev.txt" requirements-dev.txt
+
+  syntax:
+    name: Everything parses
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      # Cheap, and it catches the class of mistake that has actually bitten this
+      # project: a file committed in a state where it cannot be parsed at all.
+      - name: Python syntax
+        run: python -m compileall -q backend
+
+      - name: Frontend syntax
+        run: |
+          for file in *.js; do
+            node --check "$file"
+          done
+
+      - name: HTML and config parse
+        run: |
+          python - <<'PY'
+          import html.parser, json, pathlib, sys
+
+          failures = []
+          for path in sorted(pathlib.Path('.').glob('*.html')):
+              parser = html.parser.HTMLParser()
+              try:
+                  parser.feed(path.read_text())
+                  parser.close()
+              except Exception as error:
+                  failures.append(f"{path}: {error}")
+
+          for path in sorted(pathlib.Path('.').glob('*.json')):
+              try:
+                  json.loads(path.read_text())
+              except Exception as error:
+                  failures.append(f"{path}: {error}")
+
+          if failures:
+              print("\n".join(failures))
+              sys.exit(1)
+          print("all HTML and JSON parsed")
+          PY
