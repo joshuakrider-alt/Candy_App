@@ -448,6 +448,45 @@ def test_an_identity_event_for_nobody_is_acknowledged_but_not_applied(
     assert response.get_json() == {"received": True, "handled": False}
 
 
+def test_a_late_event_from_a_replaced_identity_session_is_ignored(
+    make_app, fake_identity
+):
+    """Stripe does not promise that webhooks arrive in creation order.  A
+    canceled first attempt must not replace the active session's state."""
+    from tests.test_payments import WEBHOOK_SECRET, signed_webhook
+
+    app = make_app(STRIPE_WEBHOOK_SECRET=WEBHOOK_SECRET)
+    client = app.test_client()
+
+    from tests.conftest import SELLER_PASSWORD, login
+
+    seller = login(client, "kiki@example.com", SELLER_PASSWORD)
+    first = seller.post("/identity/session").get_json()
+    first_id = first["url"].rsplit("/", 1)[-1]
+    second = seller.post("/identity/session").get_json()
+    second_id = second["url"].rsplit("/", 1)[-1]
+
+    body, headers = signed_webhook(
+        {
+            "id": "evt_identity_late",
+            "type": "identity.verification_session.canceled",
+            "data": {
+                "object": {
+                    "id": first_id,
+                    "status": "canceled",
+                    "metadata": {"user_id": str(seller.user["id"])},
+                }
+            },
+        }
+    )
+    response = client.post("/stripe/webhook", data=body, headers=headers)
+
+    assert response.status_code == 200
+    assert response.get_json() == {"received": True, "handled": False}
+    assert seller.get("/identity/status").get_json()["identity_status"] == "processing"
+    assert fake_identity.sessions[second_id]["status"] == "processing"
+
+
 def test_approval_can_be_gated_on_verification(make_app, fake_identity):
     app = make_app(REQUIRE_SELLER_IDENTITY=True)
     client = app.test_client()
