@@ -167,6 +167,20 @@ def create_app(config_overrides=None):
     jwt = JWTManager(app)
     CORS(app, origins=origin_list or "*")
 
+    @app.after_request
+    def set_security_headers(response):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "connect-src 'self' https://api.neighborhoodcandylady.com"
+        )
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
     with app.app_context():
         db.create_all()
         if app.config["RUN_MIGRATIONS_ON_BOOT"]:
