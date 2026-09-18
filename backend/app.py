@@ -1323,10 +1323,18 @@ def register_routes(app):
     def _apply_identity_event(event_object):
         """Route a verification verdict to the account that started it.
 
-        Matched on our own metadata first, then on the stored session id, so a
-        session started before metadata existed still resolves.
+        Match on our own metadata first, then on the stored session id, so a
+        session started before metadata existed still resolves.  A seller can
+        replace an unfinished session, though, and Stripe may deliver events
+        out of order.  Only the currently stored session is authoritative;
+        otherwise a late event for the abandoned session could overwrite the
+        newer verdict.
         """
         metadata = event_object.get("metadata") or {}
+        session_id = event_object.get("id")
+        if not session_id:
+            return False
+
         user = None
         user_id = metadata.get("user_id")
         if user_id:
@@ -1334,11 +1342,9 @@ def register_routes(app):
                 user = User.query.get(int(user_id))
             except (TypeError, ValueError):
                 user = None
-        if user is None and event_object.get("id"):
-            user = User.query.filter_by(
-                identity_session_id=event_object["id"]
-            ).first()
         if user is None:
+            user = User.query.filter_by(identity_session_id=session_id).first()
+        if user is None or user.identity_session_id != session_id:
             return False
 
         apply_identity_session(user, event_object)
