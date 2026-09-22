@@ -9,8 +9,10 @@ pickup code.
 ## Live
 
 - Site: https://www.neighborhoodcandylady.com (static frontend on Vercel)
-- API: https://candy-lady-api.onrender.com (Flask on Render)
+- API: https://api.neighborhoodcandylady.com (Flask on Render; also `candy-lady-api.onrender.com`)
 - Database: Neon Postgres via `DATABASE_URL`
+- Stripe: **live mode** on production as of 2026-09-22 (`GET /config` → `stripe_mode: "live"`)
+- Agent ops log: [`AGENT_WORKLOG.md`](AGENT_WORKLOG.md)
 
 ## Pages
 
@@ -70,12 +72,24 @@ pending) instead of taking its inventory or other buyers' orders with them.
 Admins cannot delete themselves this way; another admin removes them.
 `backend/README.md` has the full breakdown.
 
-## Payments (Stripe test mode)
+## Payments (Stripe)
 
 The buyer pays the cart subtotal to the platform's Stripe account. Nothing is
 split automatically yet: each order records `platform_fee_cents` (the
 platform's commission) and `seller_payout_cents` (what the platform owes the
 seller). Stripe Connect payouts are intentionally not part of this slice.
+
+**Production (2026-09-22):** Render `Candy-Lady-api` uses **live** Stripe keys
+(`pk_live_…` / `sk_live_…`). `GET https://api.neighborhoodcandylady.com/config`
+reports `stripe_mode: "live"`. A live webhook is registered at
+`https://api.neighborhoodcandylady.com/stripe/webhook` for
+`checkout.session.completed`, `checkout.session.expired`, and `charge.refunded`.
+
+**Still needed for payouts:** link a USD bank account in the Stripe Dashboard
+(Balances / settings). Charges can succeed before that; Stripe will not pay out
+to a bank until one is added.
+
+Use `sk_test_…` / `pk_test_…` only for local development. Never commit keys.
 
 ### Render service `Candy-Lady-api`
 
@@ -84,9 +98,9 @@ keys in the repo.**
 
 | Variable | Value |
 | --- | --- |
-| `STRIPE_SECRET_KEY` | `sk_test_…` from Stripe → Developers → API keys (test mode) |
-| `STRIPE_PUBLISHABLE_KEY` | `pk_test_…` from the same page |
-| `STRIPE_WEBHOOK_SECRET` | `whsec_…` from the webhook endpoint below (optional but recommended) |
+| `STRIPE_SECRET_KEY` | Production: `sk_live_…`. Local: `sk_test_…` |
+| `STRIPE_PUBLISHABLE_KEY` | Production: `pk_live_…`. Local: `pk_test_…` |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` from the live (or test) webhook endpoint |
 | `PUBLIC_SITE_URL` | `https://www.neighborhoodcandylady.com` |
 | `CORS_ORIGINS` | `https://www.neighborhoodcandylady.com,https://neighborhoodcandylady.com` |
 | `JWT_SECRET_KEY` | a long random string |
@@ -140,13 +154,16 @@ Nothing to configure. The frontend reads the publishable key, Stripe mode, and
 fee settings from `GET /config` on the API, so no key ever lives in the static
 bundle or in Vercel env vars.
 
-### Webhook (optional)
+### Webhook
 
-Stripe → Developers → Webhooks → Add endpoint:
+Stripe → Developers → Webhooks → Add endpoint (use **live** mode for production):
 
-- URL: `https://candy-lady-api.onrender.com/stripe/webhook`
+- URL: `https://api.neighborhoodcandylady.com/stripe/webhook`
 - Events: `checkout.session.completed`, `checkout.session.expired`, `charge.refunded`
+  (also add Identity events listed above when using seller ID verification)
 - Copy the signing secret into `STRIPE_WEBHOOK_SECRET`
+
+Production already has this live endpoint as of 2026-09-22.
 
 Without the secret the endpoint returns 503 and refuses unverified calls; the
 buyer's browser still confirms the payment against Stripe when it returns from
