@@ -1127,6 +1127,17 @@ h3 {
   min-height: 44px;
 }
 
+.footer-actions .secondary-button {
+  border: 2px solid rgba(255, 248, 239, 0.55);
+  background: transparent;
+  color: var(--cream);
+}
+
+.footer-actions .secondary-button:hover {
+  border-color: var(--lemon);
+  color: var(--lemon);
+}
+
 .footer-column {
   display: flex;
   flex-direction: column;
@@ -1180,8 +1191,14 @@ h3 {
   line-height: 1.65;
 }
 
+.info-page .app-hero {
+  grid-template-columns: 1fr;
+  align-items: start;
+  text-align: left;
+}
+
 .info-page h1 {
-  max-width: 13ch;
+  max-width: none;
 }
 
 .story-quote {
