@@ -108,10 +108,97 @@
               <div><span>Neighborhood</span><strong data-shop-neighborhood>—</strong></div>
               <div><span>Hours</span><strong data-shop-hours>—</strong></div>
               <div><span>Status</span><strong data-shop-status>—</strong></div>
-              <div><span>Payment</span><strong>Card at checkout</strong></div>
+              <div><span>Payment</span><strong data-shop-payment>Card at checkout</strong></div>
               <div><span>Platform cut</span><strong data-fee-note>—</strong></div>
             </div>
           </aside>
+        </section>
+
+        <section class="app-section reveal" data-connect-section hidden>
+          <div class="section-heading">
+            <p class="eyebrow">Payouts</p>
+            <h2>Get paid by Stripe</h2>
+          </div>
+          <p class="hero-text">
+            Card orders pay out straight to your own Stripe account, minus the
+            platform cut. Buyers cannot pay by card at your shop until this is set
+            up. Stripe collects your bank and tax details on its own page — they
+            are never stored on The Candy Lady.
+          </p>
+          <div class="profile-stack">
+            <div><span>Status</span><strong data-connect-status>Not connected</strong></div>
+          </div>
+          <p class="order-message" data-connect-message role="status"></p>
+          <div class="row-actions">
+            <button class="primary-button dark" type="button" data-connect-start>
+              Connect Stripe
+            </button>
+            <button class="soft-action" type="button" data-connect-dashboard hidden>
+              Open Stripe dashboard
+            </button>
+          </div>
+        </section>
+
+        <section class="app-section reveal" data-storefront-section hidden>
+          <div class="section-heading">
+            <p class="eyebrow">Your shop page</p>
+            <h2>Link, look, and tagline</h2>
+          </div>
+          <p class="hero-text">
+            Your shop has its own page that shows only your snacks, in your
+            colours. Share the link on a flyer or in a group chat.
+          </p>
+          <div class="profile-stack">
+            <div>
+              <span>Public link</span>
+              <strong data-storefront-link>Assigned when your shop is approved</strong>
+            </div>
+          </div>
+          <div class="row-actions">
+            <button class="soft-action" type="button" data-storefront-copy hidden>Copy link</button>
+            <a class="soft-action" data-storefront-open target="_blank" rel="noopener" hidden>Open page</a>
+          </div>
+          <form class="app-panel item-form" data-storefront-form>
+            <div class="form-row">
+              <label class="form-field">
+                <span>Shop address (/s/…)</span>
+                <input
+                  name="slug"
+                  placeholder="your-shop-name"
+                  minlength="3"
+                  maxlength="48"
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  title="Lowercase letters, numbers, and single dashes"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="form-field">
+                <span>Tagline (optional)</span>
+                <input name="tagline" maxlength="140" placeholder="Sour candy central" />
+              </label>
+            </div>
+            <div class="form-row">
+              <label class="form-field">
+                <span>Main colour</span>
+                <input type="color" name="theme_primary" value="#ff4d6d" />
+              </label>
+              <label class="form-field">
+                <span>Accent colour</span>
+                <input type="color" name="theme_accent" value="#ff8a3d" />
+              </label>
+              <label class="form-field">
+                <span>Logo image link (https, optional)</span>
+                <input type="url" name="logo_url" placeholder="https://…" />
+              </label>
+            </div>
+            <div class="row-actions">
+              <button class="primary-button dark" type="submit">Save shop page</button>
+              <button class="soft-action" type="button" data-storefront-reset-colors>
+                Use default colours
+              </button>
+            </div>
+            <p class="order-message" data-storefront-message role="status"></p>
+          </form>
         </section>
 
         <section class="app-section reveal" data-identity-section hidden>
