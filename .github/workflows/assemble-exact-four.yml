@@ -1,0 +1,53 @@
+name: assemble-exact-four
+on:
+  workflow_dispatch:
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/connect-and-storefront-identity
+      - name: Assemble exact files from staging
+        run: |
+          set -euo pipefail
+          if [[ -f .agent-staging/models.patch.a ]]; then
+            cat .agent-staging/models.patch.a .agent-staging/models.patch.b > .agent-staging/models.py.patch || true
+            patch -p1 -N < .agent-staging/models.py.patch || true
+          fi
+          patch -p1 -N < .agent-staging/test_payments.py.patch
+          patch -p1 -N < .agent-staging/styles.css.patch
+          python3 <<'PY'
+          import base64, zlib, hashlib
+          from pathlib import Path
+          b64 = Path('.agent-staging/connect.a.b64').read_text() + Path('.agent-staging/connect.b.b64').read_text()
+          dest = Path('backend/tests/test_connect_and_storefront.py')
+          dest.write_bytes(zlib.decompress(base64.b64decode(b64.encode())))
+          expected = {
+            'backend/models.py': '3f30f6304612dcd325f0ee9c988d9c542706d0d62cfb251a0b99cc1e5671bceb',
+            'backend/tests/test_connect_and_storefront.py': '547edadf96b2ed56b75fc13b4df6cdfb81dfc1c273147dd8d0978e231ec23109',
+            'backend/tests/test_payments.py': 'd234d0ad12c7f18e18b39fe9e5f73ea0202f6f57b314288ec4240dfb56147f65',
+            'styles.css': '86966da675310a8d2c7adceb6ce0e250df9c424082aad2095d05e1ae290fd3dd',
+          }
+          for path, exp in expected.items():
+            h = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            print(path, h, 'OK' if h == exp else 'MISMATCH')
+            assert h == exp, path
+          PY
+          rm -rf .agent-staging
+          rm -f backend/.mcp_path_probe.txt backend/.encoding_probe.txt backend/tests/_mcp_probe_delete_me.txt || true
+          git config user.name "joshuakrider-alt"
+          git config user.email "joshua.krider@students.maestrocollege.edu"
+          git add backend/tests/test_connect_and_storefront.py
+          git diff --cached --quiet || git commit -m "Align backend/tests/test_connect_and_storefront.py with Connect + storefront identity"
+          git add backend/tests/test_payments.py
+          git diff --cached --quiet || git commit -m "Align backend/tests/test_payments.py with Connect + storefront identity"
+          git add styles.css
+          git diff --cached --quiet || git commit -m "Align styles.css with Connect + storefront identity"
+          if git status --porcelain | grep -q .; then
+            git add -A
+            git commit -m "chore: remove agent staging and probes after exact assemble" || true
+          fi
+          git push origin HEAD:claude/connect-and-storefront-identity
