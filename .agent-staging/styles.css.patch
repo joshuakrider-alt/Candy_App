@@ -1,0 +1,88 @@
+--- a/styles.css
++++ b/styles.css
+@@ -757,6 +757,12 @@
+   gap: 12px;
+ }
+ 
++/* The grid above would otherwise beat the hidden attribute, which is how the
++ * shop pages swap the signed-in and signed-out account views. */
++.profile-stack[hidden] {
++  display: none;
++}
++
+ .quick-items div {
+   display: flex;
+   justify-content: space-between;
+@@ -1317,3 +1323,73 @@
+     grid-column: auto;
+   }
+ }
++
++/* ------------------------------------------------------------------ */
++/* Single-shop storefront (/s/<slug>)                                  */
++/* A shop's theme arrives as --cherry / --orange-pop overrides set in  */
++/* app.js from validated #rrggbb values; --shop-on-* keeps text legible */
++/* on whatever colour the seller picked.                               */
++/* ------------------------------------------------------------------ */
++.shop-page .brand-pill,
++.shop-page .filter-button.active,
++.shop-page .primary-button:not(.dark) {
++  color: var(--shop-on-primary, white);
++}
++
++/* Solid, not the orange-to-cherry gradient: text colour is chosen against the
++ * primary alone, so a pale accent in the gradient could make it unreadable. */
++.shop-page .primary-button:not(.dark) {
++  background: var(--cherry);
++}
++
++.shop-hero {
++  border-top: 10px solid var(--shop-primary, var(--cherry));
++}
++
++.shop-hero-main {
++  display: flex;
++  gap: 18px;
++  align-items: center;
++}
++
++.shop-hero-side {
++  display: grid;
++  gap: 14px;
++}
++
++.shop-logo {
++  width: 96px;
++  height: 96px;
++  flex: none;
++  object-fit: cover;
++  border-radius: var(--radius-lg);
++  border: 4px solid var(--shop-accent, var(--lemon));
++  background: var(--paper);
++}
++
++.shop-title {
++  max-width: 14ch;
++}
++
++.shop-page .badge-row span {
++  background: color-mix(in srgb, var(--shop-accent, var(--lemon)) 30%, white);
++}
++
++.shop-missing:not([hidden]) {
++  display: grid;
++  gap: 12px;
++  justify-items: start;
++}
++
++@media (max-width: 760px) {
++  .shop-hero-main {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .shop-logo {
++    width: 72px;
++    height: 72px;
++  }
++}
