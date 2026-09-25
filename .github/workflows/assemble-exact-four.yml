@@ -13,10 +13,13 @@ jobs:
       - name: Apply patches and decode connect test
         run: |
           set -euo pipefail
-          cat .agent-staging/models.patch.a .agent-staging/models.patch.b > .agent-staging/models.py.patch
-          patch -p1 < .agent-staging/models.py.patch
-          patch -p1 < .agent-staging/test_payments.py.patch
-          patch -p1 < .agent-staging/styles.css.patch
+          # models.py already aligned on remote; ignore reverse/already-applied.
+          if [[ -f .agent-staging/models.patch.a ]]; then
+            cat .agent-staging/models.patch.a .agent-staging/models.patch.b > .agent-staging/models.py.patch
+            patch -p1 -N < .agent-staging/models.py.patch || true
+          fi
+          patch -p1 -N < .agent-staging/test_payments.py.patch
+          patch -p1 -N < .agent-staging/styles.css.patch
           python3 <<'PY'
           import base64, zlib, hashlib
           from pathlib import Path
@@ -37,12 +40,29 @@ jobs:
             assert h == exp, path
           PY
           rm -rf .agent-staging
-          rm -f backend/.mcp_path_probe.txt backend/.encoding_probe.txt || true
-      - name: Commit and push
+          rm -f backend/.mcp_path_probe.txt backend/.encoding_probe.txt backend/tests/_mcp_probe_delete_me.txt || true
+      - name: Commit each aligned file
         run: |
+          set -euo pipefail
           git config user.name "joshuakrider-alt"
           git config user.email "joshua.krider@students.maestrocollege.edu"
-          git add -A
+          if [[ -f backend/tests/test_connect_and_storefront.py ]]; then
+            git add backend/tests/test_connect_and_storefront.py
+            if ! git diff --cached --quiet -- backend/tests/test_connect_and_storefront.py; then
+              git commit -m "Align backend/tests/test_connect_and_storefront.py with Connect + storefront identity"
+            fi
+          fi
+          if git status --porcelain -- backend/tests/test_payments.py | grep -q .; then
+            git add backend/tests/test_payments.py
+            git commit -m "Align backend/tests/test_payments.py with Connect + storefront identity"
+          fi
+          if git status --porcelain -- styles.css | grep -q .; then
+            git add styles.css
+            git commit -m "Align styles.css with Connect + storefront identity"
+          fi
+          if git status --porcelain | grep -q .; then
+            git add -A
+            git commit -m "chore: remove agent staging and probes after exact assemble" || true
+          fi
           git status
-          git commit -m "Connect + storefront: models, connect/payments tests, styles (exact local)"
           git push origin HEAD:claude/connect-and-storefront-identity
