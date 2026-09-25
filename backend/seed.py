@@ -14,6 +14,7 @@ import os
 import secrets
 
 from models import Candy, Seller, SellerInventory, User, db
+from storefront import unique_slug
 
 CATALOG = (
     ("Sour Gummy Mix", "Tangy fruit gummies", 250),
@@ -134,6 +135,16 @@ def seed_demo_data(verbose=True):
             db.session.add(seller)
         elif not seller.contact_email:
             seller.contact_email = spec["contact_email"]
+        # Approved shops get a public address, the same as an admin approval
+        # would give them. An existing slug is never rewritten.
+        if seller.status == "approved" and not seller.slug:
+            seller.slug = unique_slug(
+                seller.shop_name,
+                lambda candidate: Seller.query.filter(
+                    Seller.slug == candidate, Seller.id != seller.id
+                ).first()
+                is not None,
+            )
         db.session.flush()
 
         # Every approved shop gets a toggle row for every catalog item.
