@@ -159,3 +159,37 @@ def test_postgres_migration_is_idempotent_and_new_rows_still_insert(legacy_postg
         db.session.add(user)
         db.session.commit()
         assert user.id is not None
+
+
+def test_postgres_legacy_shops_gain_unique_slug_and_connect_columns(legacy_postgres_app):
+    """ADD COLUMN cannot carry unique=True; the separate indexes must exist."""
+    from sqlalchemy.exc import IntegrityError
+
+    from models import Seller
+
+    with legacy_postgres_app.app_context():
+        indexes = {
+            row[0]
+            for row in db.session.execute(
+                text("SELECT indexname FROM pg_indexes WHERE tablename = 'seller'")
+            )
+        }
+        assert {"ix_seller_slug", "uq_seller_stripe_account_id"} <= indexes
+
+        seller = Seller.query.get(1)
+        assert seller.slug == "ms-kikis-snack-spot"
+        assert seller.stripe_charges_enabled is False
+        assert seller.connect_status == "unstarted"
+
+        twin = Seller(
+            shop_name="Copy",
+            contact_name="Copy",
+            neighborhood="Elsewhere",
+            pickup_window="Never",
+            status="pending",
+            slug="ms-kikis-snack-spot",
+        )
+        db.session.add(twin)
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
