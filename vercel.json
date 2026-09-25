@@ -23,6 +23,10 @@
     {
       "source": "/pickup",
       "destination": "/pickup.html"
+    },
+    {
+      "source": "/s/:slug",
+      "destination": "/shop.html"
     }
   ]
 }
