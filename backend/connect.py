@@ -52,6 +52,7 @@ def create_express_account(seller):
     except stripe.InvalidRequestError as error:
         logger.error("connect account create refused for seller %s: %s", seller.id, error)
         if _connect_not_enabled(error):
+            # A platform-side setup gap, not something the seller can fix.
             abort(
                 503,
                 description=(
@@ -69,6 +70,12 @@ def create_express_account(seller):
 
 
 def _connect_not_enabled(error):
+    """Stripe's refusal when the platform never signed up for Connect.
+
+    Stripe has no dedicated error code for this; the message is the signal
+    ("...signed up for Connect..."), matched loosely so a rewording that keeps
+    the word "Connect" still produces the helpful 503.
+    """
     message = str(getattr(error, "user_message", None) or error or "").lower()
     return "connect" in message and ("sign" in message or "enable" in message)
 
