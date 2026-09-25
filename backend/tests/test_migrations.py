@@ -11,7 +11,7 @@ from conftest import ADMIN_PASSWORD
 from sqlalchemy import inspect
 
 from app import create_app
-from models import Order, User, db
+from models import Candy, Order, User, db
 
 # The schema exactly as the pre-payments code created it.
 LEGACY_SCHEMA = """
@@ -113,6 +113,10 @@ def test_legacy_rows_survive_and_gain_payment_columns(legacy_app):
         assert user.role == "buyer"
         # No password yet, so the account cannot be used until one is set.
         assert user.has_password is False
+
+        candy = Candy.query.get(1)
+        assert candy.owner_seller_id is None
+        assert candy.is_active is True
 
 
 def test_legacy_account_can_be_given_a_password_and_log_in(legacy_app):

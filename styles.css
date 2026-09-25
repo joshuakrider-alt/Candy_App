@@ -700,6 +700,20 @@ h3 {
   gap: 16px;
 }
 
+.item-form,
+.item-form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.item-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.item-description-field {
+  grid-column: 1 / -1;
+}
+
 .seller-card-grid,
 .inventory-grid,
 .catalog-admin-grid {
@@ -1279,6 +1293,14 @@ h3 {
 }
 
 @media (max-width: 520px) {
+  .item-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .item-description-field {
+    grid-column: auto;
+  }
+
   .site-footer {
     border-radius: 26px 26px 0 0;
   }

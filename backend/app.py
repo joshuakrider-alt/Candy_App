@@ -5,7 +5,7 @@ from datetime import timedelta
 from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from werkzeug.exceptions import HTTPException
 
 import accounts
@@ -298,12 +298,16 @@ def register_routes(app):
         abort(500, description="could not allocate a pickup code; try again")
 
     def ensure_seller_inventory_rows(seller_id):
-        """Give a shop a toggle row for every catalog item, including new ones."""
+        """Give a shop toggle rows for active platform catalog items only."""
         existing = {
             row.candy_id
             for row in SellerInventory.query.filter_by(seller_id=seller_id).all()
         }
-        missing = [candy for candy in Candy.query.all() if candy.id not in existing]
+        missing = [
+            candy
+            for candy in Candy.query.filter_by(owner_seller_id=None, is_active=True).all()
+            if candy.id not in existing
+        ]
         for candy in missing:
             db.session.add(
                 SellerInventory(
@@ -478,11 +482,15 @@ def register_routes(app):
     # ------------------------------------------------------------------
     @app.route("/candies", methods=["GET"])
     def list_candies():
-        return jsonify([candy.to_dict() for candy in Candy.query.order_by(Candy.name).all()])
+        candies = Candy.query.filter_by(owner_seller_id=None, is_active=True).order_by(Candy.name)
+        return jsonify([candy.to_dict() for candy in candies.all()])
 
     @app.route("/candies/<int:candy_id>", methods=["GET"])
     def get_candy(candy_id):
-        return jsonify(Candy.query.get_or_404(candy_id).to_dict())
+        candy = Candy.query.filter_by(
+            id=candy_id, owner_seller_id=None, is_active=True
+        ).first_or_404()
+        return jsonify(candy.to_dict())
 
     @app.route("/candies", methods=["POST"])
     @require_roles("admin")
@@ -504,6 +512,8 @@ def register_routes(app):
     @require_roles("admin")
     def update_candy(candy_id):
         candy = Candy.query.get_or_404(candy_id)
+        if candy.owner_seller_id is not None:
+            abort(400, description="seller-owned items must be managed through the seller item API")
         data = request.get_json() or {}
         candy.name = data.get("name", candy.name)
         candy.description = data.get("description", candy.description)
@@ -515,6 +525,8 @@ def register_routes(app):
     @require_roles("admin")
     def delete_candy(candy_id):
         candy = Candy.query.get_or_404(candy_id)
+        if candy.owner_seller_id is not None:
+            abort(400, description="seller-owned items must be managed through the seller item API")
         db.session.delete(candy)
         db.session.commit()
         return "", 204
@@ -1020,10 +1032,12 @@ def register_routes(app):
         if seller.status != "approved":
             abort(404, description="seller is not available")
 
-        inventory = SellerInventory.query.filter(
+        inventory = SellerInventory.query.join(Candy).filter(
             SellerInventory.seller_id == seller_id,
             SellerInventory.inventory_count > 0,
             SellerInventory.status.in_(("in-stock", "low-stock")),
+            Candy.is_active.is_(True),
+            or_(Candy.owner_seller_id.is_(None), Candy.owner_seller_id == seller_id),
         ).all()
         return jsonify(
             {
@@ -1035,6 +1049,111 @@ def register_routes(app):
     # ------------------------------------------------------------------
     # Seller dashboard
     # ------------------------------------------------------------------
+    def seller_item_values(data, partial=False):
+        values = {}
+        if not partial or "name" in data:
+            name = str(data.get("name", "")).strip()
+            if not name:
+                abort(400, description="name is required")
+            values["name"] = name
+        if "description" in data or not partial:
+            values["description"] = str(data.get("description") or "").strip()
+        for field in ("price_cents", "inventory_count"):
+            if field not in data:
+                if not partial and field == "price_cents":
+                    abort(400, description="price_cents is required")
+                continue
+            try:
+                value = int(data[field])
+            except (TypeError, ValueError):
+                abort(400, description=f"{field} must be a non-negative integer")
+            if (
+                isinstance(data[field], bool)
+                or (isinstance(data[field], float) and not data[field].is_integer())
+                or value < 0
+            ):
+                abort(400, description=f"{field} must be a non-negative integer")
+            values[field] = value
+        if "status" in data:
+            if data["status"] not in INVENTORY_STATUSES:
+                abort(400, description="invalid inventory status")
+            values["status"] = data["status"]
+        return values
+
+    def owned_item_or_404(seller_id, candy_id):
+        candy = Candy.query.get_or_404(candy_id)
+        if candy.owner_seller_id != seller_id:
+            abort(403, description="this item belongs to another shop or the platform catalog")
+        return candy
+
+    @app.route("/sellers/<int:seller_id>/items", methods=["POST"])
+    @require_roles("seller", "admin")
+    def create_seller_item(seller_id):
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        if seller.status != "approved":
+            abort(400, description="seller must be approved before adding items")
+        values = seller_item_values(request.get_json() or {})
+        count = values.pop("inventory_count", 0)
+        status = values.pop("status", "in-stock" if count > 4 else "low-stock")
+        if count == 0:
+            status = "out-of-stock"
+        elif status == "out-of-stock":
+            count = 0
+        candy = Candy(owner_seller_id=seller_id, is_active=True, **values)
+        db.session.add(candy)
+        db.session.flush()
+        inventory = SellerInventory(
+            seller_id=seller_id, candy_id=candy.id, inventory_count=count, status=status
+        )
+        db.session.add(inventory)
+        db.session.commit()
+        return jsonify(inventory.to_dict()), 201
+
+    @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["PUT"])
+    @require_roles("seller", "admin")
+    def update_seller_item(seller_id, candy_id):
+        assert_seller_access(current_user(), seller_id)
+        Seller.query.get_or_404(seller_id)
+        candy = owned_item_or_404(seller_id, candy_id)
+        if not candy.is_active:
+            abort(400, description="removed items cannot be edited")
+        values = seller_item_values(request.get_json() or {}, partial=True)
+        inventory = SellerInventory.query.filter_by(
+            seller_id=seller_id, candy_id=candy_id
+        ).first_or_404()
+        for field in ("name", "description", "price_cents"):
+            if field in values:
+                setattr(candy, field, values[field])
+        if "inventory_count" in values:
+            inventory.inventory_count = values["inventory_count"]
+            if inventory.inventory_count == 0:
+                inventory.status = "out-of-stock"
+            elif "status" not in values:
+                inventory.status = "low-stock" if inventory.inventory_count <= 4 else "in-stock"
+        if "status" in values:
+            inventory.status = values["status"]
+            if inventory.status == "out-of-stock":
+                inventory.inventory_count = 0
+        db.session.commit()
+        return jsonify(inventory.to_dict())
+
+    @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["DELETE"])
+    @require_roles("seller", "admin")
+    def delete_seller_item(seller_id, candy_id):
+        assert_seller_access(current_user(), seller_id)
+        Seller.query.get_or_404(seller_id)
+        candy = owned_item_or_404(seller_id, candy_id)
+        candy.is_active = False
+        inventory = SellerInventory.query.filter_by(
+            seller_id=seller_id, candy_id=candy_id
+        ).first()
+        if inventory:
+            inventory.inventory_count = 0
+            inventory.status = "out-of-stock"
+        db.session.commit()
+        return "", 204
+
     @app.route("/sellers/<int:seller_id>/inventory", methods=["GET"])
     @require_roles("seller", "admin")
     def get_seller_inventory(seller_id):
@@ -1044,6 +1163,7 @@ def register_routes(app):
         inventory = (
             SellerInventory.query.filter_by(seller_id=seller_id)
             .join(Candy)
+            .filter(Candy.is_active.is_(True))
             .order_by(Candy.name)
             .all()
         )
@@ -1054,7 +1174,9 @@ def register_routes(app):
     def update_seller_inventory(seller_id, candy_id):
         assert_seller_access(current_user(), seller_id)
         Seller.query.get_or_404(seller_id)
-        Candy.query.get_or_404(candy_id)
+        candy = Candy.query.get_or_404(candy_id)
+        if not candy.is_active or candy.owner_seller_id not in (None, seller_id):
+            abort(403, description="this item is not available to this shop")
         data = request.get_json() or {}
         inventory = SellerInventory.query.filter_by(
             seller_id=seller_id, candy_id=candy_id
@@ -1179,6 +1301,8 @@ def register_routes(app):
         subtotal = 0
         for candy_id, quantity in sorted(requested.items()):
             candy = Candy.query.get_or_404(candy_id)
+            if not candy.is_active or candy.owner_seller_id not in (None, seller.id):
+                abort(400, description="item is not available from this seller")
             inventory = locked.get(candy_id)
             if not inventory or inventory.inventory_count < quantity:
                 abort(400, description=f"insufficient inventory for {candy.name}")

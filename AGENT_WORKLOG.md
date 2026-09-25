@@ -33,3 +33,9 @@ Get production API out of Stripe test mode so real-card checkout works.
 - Photo uploads still off (`uploads_enabled: false`) until R2/`STORAGE_*` env is set.
 - No live end-to-end card charge run in this session (optional next step with Joshua’s OK).
 - Identity webhook events (`identity.verification_session.*`) not added to the new live endpoint yet; refresh endpoint still works without them.
+
+## 2026-09-25 — Seller-owned shop items
+
+- Added additive candy ownership and active-state fields so existing catalog rows remain global.
+- Added seller item create, edit, stock, price, and soft-remove APIs and dashboard controls.
+- Kept custom items scoped to their owner in inventory, storefront, and checkout flows.

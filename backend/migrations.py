@@ -55,6 +55,9 @@ NEW_COLUMNS = (
     ("user", "identity_error_code", "VARCHAR(100)"),
     ("seller", "profile_photo_key", "VARCHAR(500)"),
     ("seller", "profile_photo_status", "VARCHAR(20) NOT NULL DEFAULT 'pending'"),
+    # NULL ownership preserves every existing candy as a platform catalog item.
+    ("candy", "owner_seller_id", "INTEGER"),
+    ("candy", "is_active", "BOOLEAN NOT NULL DEFAULT TRUE"),
 )
 
 
