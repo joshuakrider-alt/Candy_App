@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 
 import payments  # noqa: E402  (path setup must run first)
 from app import create_app  # noqa: E402
-from models import db  # noqa: E402
+from models import Seller, db  # noqa: E402
 from seed import seed_demo_data  # noqa: E402
 
 # Set TEST_DATABASE_URL to run the whole suite against a throwaway Postgres
@@ -103,7 +103,7 @@ def make_app(tmp_path, monkeypatch):
     monkeypatch.setenv("SEED_SELLER_PASSWORD", SELLER_PASSWORD)
     monkeypatch.setenv("SEED_BUYER_PASSWORD", BUYER_PASSWORD)
 
-    def factory(**overrides):
+    def factory(connect_ready=True, **overrides):
         if TEST_DATABASE_URL:
             reset_postgres_schema()
         config = {
@@ -121,6 +121,14 @@ def make_app(tmp_path, monkeypatch):
         application = create_app(config)
         with application.app_context():
             seed_demo_data(verbose=False)
+            if connect_ready:
+                # Card checkout requires a Connect-ready shop. Fake acct_ ids,
+                # test-only: the seed itself never invents Stripe accounts.
+                for seller in Seller.query.filter_by(status="approved").all():
+                    seller.stripe_account_id = f"acct_test_seller_{seller.id}"
+                    seller.stripe_charges_enabled = True
+                    seller.stripe_details_submitted = True
+                db.session.commit()
             db.session.remove()
         return application
 
