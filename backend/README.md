@@ -29,6 +29,7 @@ The API listens on `http://127.0.0.1:5000`. A frontend served from
 | `STRIPE_SECRET_KEY` | for payments | empty | `sk_test_...` in test mode. Never commit it |
 | `STRIPE_PUBLISHABLE_KEY` | no | empty | Served to the frontend by `GET /config` |
 | `STRIPE_WEBHOOK_SECRET` | no | empty | Without it `POST /stripe/webhook` returns 503 |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | no | empty | Signing secret of the separate "Connected accounts" endpoint that delivers `account.updated`. Either secret verifies a webhook |
 | `PLATFORM_FEE_PERCENT` | no | `10` | Commission percent of the order subtotal |
 | `PLATFORM_FEE_FLAT_CENTS` | no | `0` | Extra flat commission per order |
 | `CURRENCY` | no | `usd` | Stripe currency code |
@@ -120,10 +121,11 @@ python manage.py seed-demo                    # insert missing demo rows only
 
 ## Payments
 
-Stripe Checkout in test mode, with the platform's own Stripe account (no
-Connect yet).
+Stripe Checkout on the platform's account, as **Stripe Connect destination
+charges** to each shop's Express account (see "Stripe Connect" below).
 
-1. `POST /orders` validates the cart, reserves stock, prices the order, records
+1. `POST /orders` checks the shop can take cards (Connect ready, else 409),
+   validates the cart, reserves stock, prices the order, records
    `platform_fee_cents`, opens a Stripe Checkout Session, and returns
    `checkout_url`. The order is `payment_status="pending"`.
 2. The buyer pays on Stripe's hosted page.
@@ -149,15 +151,100 @@ same thing immediately.
 ### Platform fee
 
 The buyer pays the cart subtotal; the fee does not change buyer prices. The
-whole charge lands in the platform's Stripe account, and the order records:
+order records:
 
 - `total_cents` — what the buyer paid
-- `platform_fee_cents` — `round(subtotal * PLATFORM_FEE_PERCENT / 100) + PLATFORM_FEE_FLAT_CENTS`, clamped to the subtotal
-- `seller_payout_cents` — `total_cents - platform_fee_cents`, what the platform owes the seller
+- `platform_fee_cents` — `round(subtotal * PLATFORM_FEE_PERCENT / 100) + PLATFORM_FEE_FLAT_CENTS`, clamped to the subtotal. Sent to Stripe as `application_fee_amount`
+- `seller_payout_cents` — `total_cents - platform_fee_cents`, the shop's share
+- `stripe_destination_account_id` / `payout_method` — the shop's `acct_…` and
+  `"connect"` when Stripe paid the shop; `NULL` / `"manual"` for orders from
+  before Connect, where the platform still owes the share by hand
 
-`GET /admin/revenue` totals these across paid orders. Stripe Connect (automatic
-seller payouts and `application_fee_amount`) is deliberately out of scope; the
-recorded fee is what a Connect migration would later charge.
+`GET /admin/revenue` totals paid orders, and splits the seller share into
+`connect_seller_payout_cents` (Stripe paid it) and `seller_payout_owed_cents`
+(pre-Connect orders the platform still has to pay).
+
+### Stripe Connect (Express)
+
+Each shop links a Stripe **Express** account. No extra keys: it runs on
+`STRIPE_SECRET_KEY`. The platform's Stripe account must have Connect turned on
+(Dashboard → Connect → Get started); until then `POST /sellers/<id>/stripe/connect`
+answers 503 saying so.
+
+Seller flow (buttons on `seller.html`):
+
+1. **Connect Stripe** → `POST /sellers/<id>/stripe/connect` creates the Express
+   account the first time (reuses it after) and returns a one-time Account Link.
+   The seller enters bank, identity and tax details on Stripe's page; none of
+   it reaches this API.
+2. Stripe returns to `seller.html?stripe=return` (or `?stripe=refresh` if the
+   link expired, which re-opens onboarding). The page calls
+   `GET /sellers/<id>/stripe/status`, which retrieves the account and mirrors
+   `charges_enabled` / `details_submitted` onto the shop.
+3. `account.updated` webhooks keep those flags current afterwards (e.g. Stripe
+   asks for more info and switches charges off).
+
+`connect.status` on the owner/admin view of a shop is `unstarted`,
+`onboarding`, `restricted` (details in, charges not yet enabled) or `active`.
+Buyers only see `accepts_card_payments`.
+
+Checkout requires `active`. Every new Checkout Session sets
+`payment_intent_data.transfer_data.destination = <acct_…>` and
+`payment_intent_data.application_fee_amount = platform_fee_cents`; metadata
+still carries `order_id`, `seller_id`, `platform_fee_cents` (plus
+`connect_destination`). A shop that is not `active` gets a 409 from
+`POST /orders` and `POST /orders/<id>/checkout`, before any stock is held —
+there is no silent fallback to collecting on the platform.
+
+Webhook endpoints (Stripe → Developers → Webhooks), both pointing at
+`/stripe/webhook`:
+
+- **Your account** endpoint: `checkout.session.completed`,
+  `checkout.session.expired`, `charge.refunded` (+ identity events). Secret →
+  `STRIPE_WEBHOOK_SECRET`.
+- **Connected accounts** endpoint: `account.updated`. Secret →
+  `STRIPE_CONNECT_WEBHOOK_SECRET`. Optional: the status call on return covers
+  onboarding without it, but it is how a later restriction is noticed.
+
+### Refunds
+
+`POST /admin/orders/<id>/refund` (admin) fully refunds a paid order through
+Stripe and marks it `refunded`. For a Connect order it sets
+`reverse_transfer=true` and `refund_application_fee=true`, so the money comes
+back out of the shop's balance and the platform's fee is returned too. A refund
+made in the Stripe Dashboard instead should tick the same two boxes ("Reverse
+transfer", "Refund application fee"); otherwise the platform absorbs it. Either
+way `charge.refunded` still flips the order to `refunded`. Partial refunds are
+not supported in the API yet.
+
+## Storefront identity
+
+Every approved shop has a public page at `/s/<slug>` (`shop.html`, via a
+`vercel.json` rewrite; `shop.html?slug=…` works on a plain static server). It
+shows only that shop: its name, tagline, neighborhood, pickup hours, optional
+logo, and its own active items (platform catalog rows it stocks plus items it
+owns), themed with its colours. Checkout from there goes to that shop and
+Stripe returns the buyer to the same page.
+
+Seller fields (all optional or defaulted, added by boot migrations):
+
+- `slug` — unique, `[a-z0-9]+(?:-[a-z0-9]+)*`, 3–48 characters, not a reserved
+  word (`admin`, `api`, `seller`, `buyer`, `apply`, `privacy`, `terms`, …; see
+  `storefront.RESERVED_SLUGS`). Generated from `shop_name` on approval
+  (`-2`, `-3` on clashes); existing approved shops are backfilled on boot.
+  Pending shops have none. The seller can change it; the old link stops working.
+- `tagline` — up to 140 characters.
+- `theme_primary`, `theme_accent` — strictly `#rrggbb` (they are written into
+  CSS on a public page). The API also returns `on_primary`/`on_accent`, a
+  black-or-white text colour picked for contrast.
+- `logo_url` — `https://` only. No upload pipeline yet.
+
+`PUT /sellers/<id>/storefront` (owner or admin) edits them; send `null`/`""`
+to clear an optional one.
+
+Hooks for guided self-serve onboarding (later PR): a shop's `slug` and
+`connect.status` are everything a signup funnel needs to show "your link" and
+"finish payouts"; approval is still the admin step that makes both live.
 
 ## Schema migrations
 
@@ -188,6 +275,8 @@ Public:
 - `GET /candies`, `GET /candies/<id>`
 - `GET /sellers` — approved shops with in-stock counts
 - `GET /sellers/<id>/storefront` — one approved shop's in-stock items
+- `GET /shops` — approved shops with a slug: slug, name, tagline, neighborhood, theme, `accepts_card_payments`
+- `GET /shops/<slug>` — one approved shop's profile and active in-stock items; 404 if unknown or not approved
 - `POST /applications` — apply to sell, creates the seller login
 - `POST /stripe/webhook`
 
@@ -197,6 +286,8 @@ Signed in:
 - `GET /orders/<id>`
 - `POST /orders`, `POST /orders/<id>/checkout`, `POST /orders/<id>/payment/confirm`, `POST /orders/<id>/cancel` (buyer)
 - `GET /sellers/<id>/inventory`, `PUT /sellers/<id>/inventory/<candy_id>`, `GET /sellers/<id>/orders`, `PUT /orders/<id>/status` (that shop's seller, or admin)
+- `PUT /sellers/<id>/storefront` — slug, tagline, theme, logo (that shop's seller, or admin)
+- `POST /sellers/<id>/stripe/connect`, `GET /sellers/<id>/stripe/status`, `POST /sellers/<id>/stripe/dashboard` — Connect onboarding, status refresh, Express dashboard link (that shop's seller, or admin)
 
 Admin only:
 
@@ -204,6 +295,7 @@ Admin only:
 - `GET /users`, `POST /users`, `GET /users/<id>`, `PUT /users/<id>/password`
 - `POST /candies`, `PUT /candies/<id>`, `DELETE /candies/<id>`
 - `GET /orders`, `GET /admin/revenue`
+- `POST /admin/orders/<id>/refund`
 
 ## Tests
 
