@@ -1095,7 +1095,9 @@ if (sellerApp) {
   const inStockCount = sellerApp.querySelector("[data-in-stock-count]");
   const activeOrderCount = sellerApp.querySelector("[data-seller-order-count]");
   const payoutTotal = sellerApp.querySelector("[data-seller-payout-total]");
-  const inventoryGrid = sellerApp.querySelector(".inventory-grid");
+  const inventoryGrid = sellerApp.querySelector("[data-inventory-grid]");
+  const itemForm = sellerApp.querySelector("[data-item-form]");
+  const itemMessage = sellerApp.querySelector("[data-item-message]");
   const orderList = sellerApp.querySelector(".order-list");
   const shopName = sellerApp.querySelector("[data-shop-name]");
   const shopNeighborhood = sellerApp.querySelector("[data-shop-neighborhood]");
@@ -1133,6 +1135,7 @@ if (sellerApp) {
         .map((item) => {
           const category = item.candy?.category || "candy";
           const tone = categoryTone[category] || "strawberry";
+          const owned = item.candy?.owner_seller_id === sellerId;
           return `
             <article
               class="inventory-card ${tone}"
@@ -1142,8 +1145,9 @@ if (sellerApp) {
               data-inventory-count="${item.inventory_count}"
             >
               <div>
-                <p class="card-label">${escapeHtml(category)}</p>
+                <p class="card-label">${owned ? "Your item" : "From platform catalog"}</p>
                 <h3>${escapeHtml(item.candy.name)}</h3>
+                <p data-item-description>${escapeHtml(item.candy.description || "")}</p>
               </div>
               <div class="inventory-meta">
                 <span>${formatCents(item.candy.price_cents)} · ${
@@ -1153,10 +1157,11 @@ if (sellerApp) {
                 <button class="mini-action" type="button" data-toggle-stock>${
                   item.status === "out-of-stock" ? "Mark in stock" : "Mark out"
                 }</button>
+                ${owned ? '<button class="mini-action" type="button" data-edit-item>Edit</button><button class="mini-action" type="button" data-remove-item>Remove</button>' : ""}
               </div>
             </article>`;
         })
-        .join("") || '<p class="empty-state">No catalog items yet.</p>';
+        .join("") || '<p class="empty-state">No items yet. Add the sweets you sell.</p>';
     inStockCount.textContent = inventory.filter(
       (item) => item.status !== "out-of-stock"
     ).length;
@@ -1236,6 +1241,50 @@ if (sellerApp) {
   };
 
   inventoryGrid.addEventListener("click", async (event) => {
+    const editButton = event.target.closest("[data-edit-item]");
+    const removeButton = event.target.closest("[data-remove-item]");
+    const itemButton = editButton || removeButton;
+    if (itemButton) {
+      const card = itemButton.closest("[data-inventory-card]");
+      try {
+        if (removeButton) {
+          if (!window.confirm("Remove this item from your shop? Past orders will keep their details.")) return;
+          await api(`/sellers/${sellerId}/items/${card.dataset.candyId}`, {
+            method: "DELETE",
+            auth: true,
+          });
+        } else {
+          const current = Number(card.dataset.inventoryCount) || 0;
+          const name = window.prompt("Item name", card.querySelector("h3").textContent);
+          if (name === null) return;
+          const price = window.prompt("Price in dollars", card.querySelector(".inventory-meta span").textContent.split(" · ")[0].replace("$", ""));
+          if (price === null) return;
+          const description = window.prompt(
+            "Description (optional)",
+            card.querySelector("[data-item-description]").textContent
+          );
+          if (description === null) return;
+          const stock = window.prompt("Stock quantity", String(current));
+          if (stock === null) return;
+          const priceCents = Math.round(Number(price) * 100);
+          await api(`/sellers/${sellerId}/items/${card.dataset.candyId}`, {
+            method: "PUT",
+            auth: true,
+            body: {
+              name,
+              description,
+              price_cents: priceCents,
+              inventory_count: Number(stock),
+            },
+          });
+        }
+        itemMessage.textContent = removeButton ? "Item removed." : "Item updated.";
+        loadSellerDashboard();
+      } catch (error) {
+        itemMessage.textContent = error.message || "That item could not be changed.";
+      }
+      return;
+    }
     const stockButton = event.target.closest("[data-toggle-stock]");
     if (!stockButton) return;
     const card = stockButton.closest("[data-inventory-card]");
@@ -1258,6 +1307,31 @@ if (sellerApp) {
         "beforebegin",
         `<p class="order-message">${escapeHtml(error.message)}</p>`
       );
+    }
+  });
+
+  itemForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(itemForm);
+    const priceCents = Math.round(Number(form.get("price")) * 100);
+    const inventoryCount = Number(form.get("inventory_count"));
+    itemMessage.textContent = "Adding item…";
+    try {
+      await api(`/sellers/${sellerId}/items`, {
+        method: "POST",
+        auth: true,
+        body: {
+          name: form.get("name"),
+          description: form.get("description"),
+          price_cents: priceCents,
+          inventory_count: inventoryCount,
+        },
+      });
+      itemForm.reset();
+      itemMessage.textContent = "Item added to your shop.";
+      loadSellerDashboard();
+    } catch (error) {
+      itemMessage.textContent = error.message || "That item could not be added.";
     }
   });
 

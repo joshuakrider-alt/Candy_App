@@ -249,7 +249,7 @@ class Seller(db.Model):
 
 
 class Candy(db.Model):
-    """Global catalog item; availability belongs to SellerInventory."""
+    """A platform catalog item or a seller-owned shop item."""
 
     __tablename__ = "candy"
 
@@ -257,6 +257,8 @@ class Candy(db.Model):
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.String(500))
     price_cents = db.Column(db.Integer, nullable=False, default=0)
+    owner_seller_id = db.Column(db.Integer, db.ForeignKey("seller.id"))
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
 
     seller_inventory = db.relationship(
         "SellerInventory",
@@ -271,6 +273,8 @@ class Candy(db.Model):
             "name": self.name,
             "description": self.description,
             "price_cents": self.price_cents,
+            "owner_seller_id": self.owner_seller_id,
+            "is_active": self.is_active,
             "category": category_for_name(self.name),
         }
 

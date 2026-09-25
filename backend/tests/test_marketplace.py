@@ -126,3 +126,77 @@ def test_seller_stock_toggle_changes_the_public_storefront(kiki_seller, client):
     after = client.get(f"/sellers/{seller_id}/storefront").get_json()["items"]
     assert target["candy_id"] not in [item["candy_id"] for item in after]
     assert len(after) == len(before) - 1
+
+
+def test_seller_can_create_edit_and_remove_an_owned_item(kiki_seller, client):
+    seller_id = kiki_seller.user["seller_id"]
+    created = kiki_seller.post(
+        f"/sellers/{seller_id}/items",
+        json={
+            "name": "Peach Clouds",
+            "description": "Soft peach sweets",
+            "price_cents": 275,
+            "inventory_count": 6,
+        },
+    )
+    assert created.status_code == 201
+    item = created.get_json()
+    assert item["candy"]["owner_seller_id"] == seller_id
+    assert item["status"] == "in-stock"
+
+    inventory = kiki_seller.get(f"/sellers/{seller_id}/inventory").get_json()
+    assert item["candy_id"] in [row["candy_id"] for row in inventory]
+    storefront = client.get(f"/sellers/{seller_id}/storefront").get_json()["items"]
+    assert item["candy_id"] in [row["candy_id"] for row in storefront]
+
+    updated = kiki_seller.put(
+        f"/sellers/{seller_id}/items/{item['candy_id']}",
+        json={"name": "Peach Cloud Bites", "price_cents": 300, "inventory_count": 3},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["candy"]["price_cents"] == 300
+
+    removed = kiki_seller.delete(f"/sellers/{seller_id}/items/{item['candy_id']}")
+    assert removed.status_code == 204
+    storefront = client.get(f"/sellers/{seller_id}/storefront").get_json()["items"]
+    assert item["candy_id"] not in [row["candy_id"] for row in storefront]
+
+
+def test_custom_item_is_private_to_owner_inventory_and_mutations(
+    kiki_seller, northview_seller
+):
+    owner_id = kiki_seller.user["seller_id"]
+    other_id = northview_seller.user["seller_id"]
+    item = kiki_seller.post(
+        f"/sellers/{owner_id}/items",
+        json={"name": "Private Praline", "price_cents": 150, "inventory_count": 2},
+    ).get_json()
+
+    other_inventory = northview_seller.get(f"/sellers/{other_id}/inventory").get_json()
+    assert item["candy_id"] not in [row["candy_id"] for row in other_inventory]
+    assert northview_seller.put(
+        f"/sellers/{other_id}/items/{item['candy_id']}", json={"price_cents": 1}
+    ).status_code == 403
+    assert northview_seller.delete(
+        f"/sellers/{other_id}/items/{item['candy_id']}"
+    ).status_code == 403
+
+
+def test_buyer_can_order_a_seller_owned_item(kiki_seller, buyer, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    item = kiki_seller.post(
+        f"/sellers/{seller_id}/items",
+        json={"name": "Chocolate Moon", "price_cents": 425, "inventory_count": 5},
+    ).get_json()
+
+    response = buyer.post(
+        "/orders",
+        json={
+            "seller_id": seller_id,
+            "items": [{"candy_id": item["candy_id"], "quantity": 2}],
+        },
+    )
+    assert response.status_code == 201
+    order = response.get_json()
+    assert order["total_cents"] == 850
+    assert order["items"][0]["candy"]["name"] == "Chocolate Moon"

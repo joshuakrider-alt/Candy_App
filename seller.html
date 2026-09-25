@@ -171,7 +171,33 @@
             <p class="eyebrow">Inventory controls</p>
             <h2>Your sweets and snacks</h2>
           </div>
-          <div class="inventory-grid">
+          <form class="app-panel item-form" data-item-form>
+            <div class="section-heading">
+              <p class="eyebrow">Your shop</p>
+              <h3>Add an item</h3>
+            </div>
+            <div class="item-form-grid">
+              <label class="form-field">
+                <span>Name</span>
+                <input name="name" required maxlength="200" placeholder="Strawberry gummies" />
+              </label>
+              <label class="form-field">
+                <span>Price (USD)</span>
+                <input name="price" required type="number" min="0" step="0.01" placeholder="2.50" />
+              </label>
+              <label class="form-field item-description-field">
+                <span>Description (optional)</span>
+                <input name="description" maxlength="500" placeholder="A short description" />
+              </label>
+              <label class="form-field">
+                <span>Starting stock</span>
+                <input name="inventory_count" required type="number" min="0" step="1" value="0" />
+              </label>
+            </div>
+            <p class="order-message" data-item-message role="status"></p>
+            <button class="primary-button dark" type="submit">Add item</button>
+          </form>
+          <div class="inventory-grid" data-inventory-grid>
             <p class="empty-state">Loading inventory…</p>
           </div>
         </section>
