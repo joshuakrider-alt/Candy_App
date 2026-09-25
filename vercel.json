@@ -15,6 +15,14 @@
     {
       "source": "/contact",
       "destination": "/contact.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms.html"
+    },
+    {
+      "source": "/pickup",
+      "destination": "/pickup.html"
     }
   ]
 }
