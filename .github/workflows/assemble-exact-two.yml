@@ -1,0 +1,73 @@
+name: assemble-exact-two
+on:
+  workflow_dispatch:
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/connect-and-storefront-identity
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Join part files, decode exact app.js and backend/app.py
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import base64, zlib, hashlib, re
+          from pathlib import Path
+          staging = Path('.agent-staging')
+          # Join any *.N.pK.b64 part sets into *.N.b64
+          groups = {}
+          for p in sorted(staging.iterdir()):
+            m = re.match(r'^(.*)\.p(\d+)\.b64$', p.name)
+            if not m:
+              continue
+            key, idx = m.group(1), int(m.group(2))
+            groups.setdefault(key, []).append((idx, p))
+          for key, items in groups.items():
+            items.sort()
+            out = staging / f'{key}.b64'
+            out.write_text(''.join(p.read_text() for _, p in items))
+            print('joined', out, 'from', len(items), 'parts', 'bytes', out.stat().st_size)
+          specs = [
+            ('app.js', 'app.js', 7, 'c30059775a228bdc9ac20a892e11320383658c072319c339508678c2205783e1'),
+            ('backend_app.py', 'backend/app.py', 6, '7c74400459312ce19a853a43e93c37d900f560fd7d921246a2d8d38550a1bc99'),
+          ]
+          for key, dest, nparts, exp in specs:
+            b64 = ''.join((staging / f'{key}.{i}.b64').read_text().replace('\n','').replace('\r','') for i in range(nparts))
+            raw = zlib.decompress(base64.b64decode(b64.encode()))
+            path = Path(dest)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+            h = hashlib.sha256(raw).hexdigest()
+            print(dest, h, 'OK' if h == exp else 'MISMATCH', len(raw))
+            assert h == exp, dest
+          PY
+          rm -rf .agent-staging
+          rm -f backend/.mcp_path_probe.txt backend/.encoding_probe.txt backend/tests/_mcp_probe_delete_me.txt || true
+      - name: Commit each aligned file and push
+        run: |
+          set -euo pipefail
+          git config user.name "joshuakrider-alt"
+          git config user.email "joshua.krider@students.maestrocollege.edu"
+          if git status --porcelain -- app.js | grep -q .; then
+            git add -- app.js
+            git commit -m "Align app.js with Connect + storefront identity"
+          else
+            echo "No changes for app.js"
+          fi
+          if git status --porcelain -- backend/app.py | grep -q .; then
+            git add -- backend/app.py
+            git commit -m "Align backend/app.py with Connect + storefront identity"
+          else
+            echo "No changes for backend/app.py"
+          fi
+          if git status --porcelain | grep -q .; then
+            git add -A
+            git commit -m "chore: remove agent staging after exact assemble" || true
+          fi
+          git status
+          git log --oneline -5
+          git push origin HEAD:claude/connect-and-storefront-identity
