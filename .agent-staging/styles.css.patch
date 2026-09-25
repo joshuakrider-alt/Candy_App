@@ -24,6 +24,7 @@
 +/* app.js from validated #rrggbb values; --shop-on-* keeps text legible */
 +/* on whatever colour the seller picked.                               */
 +/* ------------------------------------------------------------------ */
++
 +.shop-page .brand-pill,
 +.shop-page .filter-button.active,
 +.shop-page .primary-button:not(.dark) {
