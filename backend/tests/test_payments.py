@@ -430,6 +430,10 @@ def test_admin_revenue_counts_only_paid_orders(client, buyer, admin, kiki_seller
         "gross_cents": 0,
         "platform_fee_cents": 0,
         "seller_payout_cents": 0,
+        "connect_order_count": 0,
+        "connect_seller_payout_cents": 0,
+        "manual_order_count": 0,
+        "seller_payout_owed_cents": 0,
         "platform_fee_percent": 10.0,
         "platform_fee_flat_cents": 0,
     }
@@ -446,6 +450,11 @@ def test_admin_revenue_counts_only_paid_orders(client, buyer, admin, kiki_seller
     assert revenue["gross_cents"] == order["total_cents"]
     assert revenue["platform_fee_cents"] == order["platform_fee_cents"]
     assert revenue["seller_payout_cents"] == order["seller_payout_cents"]
+    # Stripe paid the shop directly, so the platform owes nothing by hand.
+    assert revenue["connect_order_count"] == 1
+    assert revenue["connect_seller_payout_cents"] == order["seller_payout_cents"]
+    assert revenue["manual_order_count"] == 0
+    assert revenue["seller_payout_owed_cents"] == 0
 
 
 def test_buyer_order_history_hides_codes_until_paid(client, buyer, kiki_seller, fake_stripe):

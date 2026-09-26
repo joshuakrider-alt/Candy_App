@@ -39,3 +39,16 @@ Get production API out of Stripe test mode so real-card checkout works.
 - Added additive candy ownership and active-state fields so existing catalog rows remain global.
 - Added seller item create, edit, stock, price, and soft-remove APIs and dashboard controls.
 - Kept custom items scoped to their owner in inventory, storefront, and checkout flows.
+
+## 2026-09-25 — Stripe Connect (Express) + per-shop storefronts
+
+- Card checkout is now a Connect destination charge to the shop's Express
+  account; `application_fee_amount = platform_fee_cents`. Shops that are not
+  `charges_enabled` get a 409 instead of a platform-only charge.
+- **Deploy impact:** every existing shop starts unconnected, so card checkout
+  pauses per shop until its seller finishes "Connect Stripe" on seller.html.
+- Joshua's side: enable Connect (Express) in the live Stripe Dashboard; add a
+  "Connected accounts" webhook for `account.updated` to the same URL and set
+  `STRIPE_CONNECT_WEBHOOK_SECRET` on Render (optional).
+- Seller slug/tagline/theme/logo columns added by boot migration; approved
+  shops backfilled with slugs; public page at `/s/<slug>` (vercel rewrite).

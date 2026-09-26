@@ -188,12 +188,56 @@ def test_a_legacy_order_survives_the_buyer_deleting_their_account(legacy_app):
         assert [item.quantity for item in order.items] == [1]
 
 
+def test_legacy_shops_gain_storefront_and_connect_columns(legacy_app):
+    """Seller identity + Connect columns arrive in place, with safe defaults."""
+    from models import Seller
+
+    with legacy_app.app_context():
+        columns = {column["name"] for column in inspect(db.engine).get_columns("seller")}
+        for name in (
+            "slug",
+            "tagline",
+            "theme_primary",
+            "theme_accent",
+            "logo_url",
+            "stripe_account_id",
+            "stripe_charges_enabled",
+            "stripe_details_submitted",
+            "stripe_connect_updated_at",
+        ):
+            assert name in columns
+        assert "stripe_destination_account_id" in {
+            column["name"] for column in inspect(db.engine).get_columns("order")
+        }
+        indexes = {index["name"] for index in inspect(db.engine).get_indexes("seller")}
+        assert "ix_seller_slug" in indexes
+
+        seller = Seller.query.get(1)
+        # The approved legacy shop was backfilled with a public address...
+        assert seller.slug == "ms-kikis-snack-spot"
+        # ...and starts with no Connect account, so it cannot take cards yet.
+        assert seller.stripe_account_id is None
+        assert seller.stripe_charges_enabled is False
+        assert seller.connect_status == "unstarted"
+        # The legacy order predates Connect.
+        assert Order.query.get(7).payout_method == "manual"
+
+    client = legacy_app.test_client()
+    shop = client.get("/shops/ms-kikis-snack-spot")
+    assert shop.status_code == 200
+    assert shop.get_json()["seller"]["accepts_card_payments"] is False
+
+
 def test_migrations_are_idempotent(legacy_app):
     from migrations import run_migrations
 
     with legacy_app.app_context():
         assert run_migrations() == set()
         assert run_migrations() == set()
+        # The slug backfill is a no-op once every approved shop has one.
+        from models import Seller
+
+        assert Seller.query.get(1).slug == "ms-kikis-snack-spot"
 
 
 def test_a_postgres_scheme_url_is_normalized(monkeypatch):

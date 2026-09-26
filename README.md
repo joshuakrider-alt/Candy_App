@@ -18,7 +18,8 @@ pickup code.
 
 - `index.html` — brand and how it works
 - `buyer.html` — account, shop picker, cart, card checkout, pickup codes
-- `seller.html` — seller login, stock toggles, paid pickup queue
+- `shop.html` — one shop's own branded page, served at `/s/<slug>`
+- `seller.html` — seller login, stock toggles, paid pickup queue, Stripe payouts, shop page settings
 - `admin.html` — admin login, seller approval, catalog, platform earnings
 - `apply.html` — seller application, including the password the seller will use
 
@@ -26,8 +27,11 @@ pickup code.
 
 - Real accounts with per-account hashed passwords for buyers, sellers, and admins
 - Buyers browse and order from **any** approved shop, not one hardcoded seller
-- Card payment through Stripe Checkout when the order is placed
-- A platform fee recorded on every order, with admin totals
+- Card payment through Stripe Checkout when the order is placed, paid out to
+  the shop's own Stripe Express account (Stripe Connect)
+- A platform fee on every order, kept by the platform as Stripe's
+  `application_fee_amount`, with admin totals
+- A public page per shop at `/s/<slug>`, in the shop's own colours
 - Pickup codes released only after payment clears
 - Sellers see and fulfill only their own paid orders
 - Admins approve sellers, who then log in with the password they chose
@@ -74,10 +78,63 @@ Admins cannot delete themselves this way; another admin removes them.
 
 ## Payments (Stripe)
 
-The buyer pays the cart subtotal to the platform's Stripe account. Nothing is
-split automatically yet: each order records `platform_fee_cents` (the
-platform's commission) and `seller_payout_cents` (what the platform owes the
-seller). Stripe Connect payouts are intentionally not part of this slice.
+The buyer pays on the platform's Stripe Checkout page, and the charge is a
+**Stripe Connect destination charge**: Stripe sends the order total to the
+shop's Express account and keeps `platform_fee_cents` for the platform as
+`application_fee_amount`. Stripe pays sellers; nobody settles up by hand.
+
+A shop can only take card orders once its Stripe account is ready
+(`charges_enabled`). Until then its page says "Card orders coming soon" and the
+API answers 409 before reserving any stock — there is no fallback to the
+platform collecting the money. **Every shop that is live today starts out not
+connected**, so after this deploys each seller has to click "Connect Stripe" on
+`seller.html` before buyers can pay them again.
+
+Orders placed before Connect keep `payout_method: "manual"`; `/admin/revenue`
+reports what is still owed on those separately. `backend/README.md` has the
+full Connect, webhook and refund details.
+
+### Stripe Connect setup (one time, Stripe Dashboard)
+
+1. **Enable Connect** on the platform account: Dashboard → Connect → Get
+   started, choose Express accounts, and fill in the platform profile. Until
+   this is done, "Connect Stripe" on `seller.html` shows "Stripe Connect is not
+   enabled on the platform's Stripe account yet".
+2. **Add a Connected accounts webhook**: Developers → Webhooks → Add endpoint →
+   "Events on Connected accounts", URL
+   `https://api.neighborhoodcandylady.com/stripe/webhook`, event
+   `account.updated`. Put its signing secret in Render as
+   `STRIPE_CONNECT_WEBHOOK_SECRET`. (Optional — the seller page checks status
+   when Stripe sends the seller back — but it is how later restrictions reach
+   the app.)
+3. Refunds: use the admin refund endpoint, or tick "Reverse transfer" and
+   "Refund application fee" when refunding in the Dashboard.
+
+### How a seller gets paid
+
+1. Apply on `apply.html`, get approved by an admin (unchanged). Approval also
+   gives the shop its `/s/<slug>` link.
+2. On `seller.html`, click **Connect Stripe** and finish Stripe's hosted
+   onboarding (bank account, identity, tax info — entered at Stripe, never
+   stored here).
+3. Back on `seller.html` the Payouts panel reads "Ready"; buyers can now pay.
+
+### Shop pages (`/s/<slug>`)
+
+Each approved shop gets a public page with only its own items, name, tagline,
+neighborhood, pickup hours and optional logo, in its chosen colours. Sellers
+edit the address, tagline, colours and logo link under "Your shop page" on
+`seller.html`, and can copy the link from there. `buyer.html` still lists every
+shop and links each card to its page. Slugs are lowercase kebab-case, 3–48
+characters, unique, and cannot be reserved words like `admin` or `privacy`.
+
+### Not in this slice
+
+- Self-serve seller onboarding (apply → admin approval is still required; the
+  shop's `slug` and Connect status are the hooks a guided signup will use)
+- Custom domains per shop
+- Logo file uploads (the logo is an https link for now)
+- Partial refunds through the API
 
 **Production (2026-09-22):** Render `Candy-Lady-api` uses **live** Stripe keys
 (`pk_live_…` / `sk_live_…`). `GET https://api.neighborhoodcandylady.com/config`
@@ -85,9 +142,9 @@ reports `stripe_mode: "live"`. A live webhook is registered at
 `https://api.neighborhoodcandylady.com/stripe/webhook` for
 `checkout.session.completed`, `checkout.session.expired`, and `charge.refunded`.
 
-**Still needed for payouts:** link a USD bank account in the Stripe Dashboard
-(Balances / settings). Charges can succeed before that; Stripe will not pay out
-to a bank until one is added.
+**Still needed for platform payouts:** link a USD bank account in the Stripe
+Dashboard (Balances / settings) so the platform's own fees can be paid out.
+Each seller links their own bank during Connect onboarding.
 
 Use `sk_test_…` / `pk_test_…` only for local development. Never commit keys.
 
@@ -101,6 +158,7 @@ keys in the repo.**
 | `STRIPE_SECRET_KEY` | Production: `sk_live_…`. Local: `sk_test_…` |
 | `STRIPE_PUBLISHABLE_KEY` | Production: `pk_live_…`. Local: `pk_test_…` |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` from the live (or test) webhook endpoint |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | optional: `whsec_…` from the "Connected accounts" endpoint (`account.updated`) |
 | `PUBLIC_SITE_URL` | `https://www.neighborhoodcandylady.com` |
 | `CORS_ORIGINS` | `https://www.neighborhoodcandylady.com,https://neighborhoodcandylady.com` |
 | `JWT_SECRET_KEY` | a long random string |
@@ -181,6 +239,13 @@ Stripe test mode only:
 
 Run against the deployed site (or locally, see below). You need an admin
 account and Stripe test keys set.
+
+**0. Seller connects Stripe (test mode)**
+
+1. Log in on `seller.html` as a shop's seller. The Payouts panel reads "Not connected" and the shop profile says cards are off.
+2. Click "Connect Stripe" and complete Stripe's test onboarding (use Stripe's test values, e.g. routing `110000000`, account `000123456789`).
+3. Back on `seller.html` the panel reads "Ready — card orders pay out to you".
+4. "Your shop page" shows the `/s/<slug>` link; "Copy link" copies it, "Open page" shows the shop in its colours with only its items.
 
 **1. Buyer pays and gets a pickup code**
 

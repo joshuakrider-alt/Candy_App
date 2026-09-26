@@ -58,6 +58,20 @@ NEW_COLUMNS = (
     # NULL ownership preserves every existing candy as a platform catalog item.
     ("candy", "owner_seller_id", "INTEGER"),
     ("candy", "is_active", "BOOLEAN NOT NULL DEFAULT TRUE"),
+    # Storefront identity and Stripe Connect. Every one is nullable or has a
+    # constant default, so existing shops keep working exactly as before:
+    # no slug (assigned by backfill below for approved shops) and no Connect
+    # account (checkout keeps collecting to the platform).
+    ("seller", "slug", "VARCHAR(64)"),
+    ("seller", "tagline", "VARCHAR(200)"),
+    ("seller", "theme_primary", "VARCHAR(7)"),
+    ("seller", "theme_accent", "VARCHAR(7)"),
+    ("seller", "logo_url", "VARCHAR(500)"),
+    ("seller", "stripe_account_id", "VARCHAR(255)"),
+    ("seller", "stripe_charges_enabled", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("seller", "stripe_details_submitted", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("seller", "stripe_connect_updated_at", "TIMESTAMP"),
+    ("order", "stripe_destination_account_id", "VARCHAR(255)"),
 )
 
 
@@ -85,8 +99,73 @@ def run_migrations():
 
     _relax_order_user_id_not_null(existing_tables)
     _backfill(existing_tables, added)
+    _backfill_seller_slugs(existing_tables)
+    _ensure_seller_slug_index(existing_tables)
     _ensure_check_constraints(existing_tables)
     return added
+
+
+def _backfill_seller_slugs(existing_tables):
+    """Give every already-approved shop a public address.
+
+    New approvals get one in the approve route; shops approved before this
+    column existed would otherwise have no /s/<slug> link until someone edited
+    them. Pending and rejected shops are left without one on purpose.
+    """
+    if "seller" not in existing_tables:
+        return 0
+
+    from storefront import unique_slug
+
+    seller_table = _quote("seller")
+    with db.engine.begin() as connection:
+        taken = {
+            row[0]
+            for row in connection.execute(
+                text(f"SELECT slug FROM {seller_table} WHERE slug IS NOT NULL")
+            )
+        }
+        missing = connection.execute(
+            text(
+                f"SELECT id, shop_name FROM {seller_table} "
+                "WHERE status = 'approved' AND slug IS NULL ORDER BY id"
+            )
+        ).fetchall()
+        for seller_id, shop_name in missing:
+            slug = unique_slug(shop_name, lambda candidate: candidate in taken)
+            taken.add(slug)
+            connection.execute(
+                text(f"UPDATE {seller_table} SET slug = :slug WHERE id = :id"),
+                {"slug": slug, "id": seller_id},
+            )
+    if missing:
+        logger.info("migration: assigned slugs to %d approved shops", len(missing))
+    return len(missing)
+
+
+def _ensure_seller_slug_index(existing_tables):
+    """Uniqueness for slugs (and Connect accounts) on pre-existing tables.
+
+    `ADD COLUMN` cannot carry the model's unique=True, so the index is created
+    separately. NULLs do not collide in a unique index on either database, so
+    shops without a slug or account are unaffected.
+    """
+    if "seller" not in existing_tables:
+        return
+    for name, column in (
+        ("ix_seller_slug", "slug"),
+        ("uq_seller_stripe_account_id", "stripe_account_id"),
+    ):
+        try:
+            with db.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        f"CREATE UNIQUE INDEX IF NOT EXISTS {name} "
+                        f"ON {_quote('seller')} ({_quote(column)})"
+                    )
+                )
+        except Exception:  # pragma: no cover - depends on existing rows and grants
+            logger.warning("migration: could not create %s", name, exc_info=True)
 
 
 def _relax_order_user_id_not_null(existing_tables):

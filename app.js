@@ -408,6 +408,10 @@ if (buyerApp) {
   const buyerLogoutButton = buyerApp.querySelector("[data-buyer-logout]");
   const authTabs = [...buyerApp.querySelectorAll("[data-auth-tab]")];
 
+  // shop.html (served at /s/<slug>) reuses this whole app, pinned to one shop
+  // and wearing that shop's colours. buyer.html is the multi-shop marketplace.
+  const singleShop = buyerApp.hasAttribute("data-single-shop");
+
   const CART_KEY = "candyLadyCart";
   const SELLER_KEY = "candyLadySellerId";
 
@@ -528,6 +532,7 @@ if (buyerApp) {
   /* ---------------- shops ---------------- */
 
   const renderSellerCards = () => {
+    if (!sellerCards) return;
     if (!sellers.length) {
       sellerCards.innerHTML =
         '<p class="empty-state">No approved shops are open yet. Check back soon.</p>';
@@ -549,15 +554,23 @@ if (buyerApp) {
               </div>
               ${selected ? '<span class="status-pill approved">Shopping</span>' : ""}
             </div>
+            ${seller.tagline ? `<p>${escapeHtml(seller.tagline)}</p>` : ""}
             <p>${escapeHtml(seller.neighborhood)} | ${escapeHtml(seller.pickup_window)}</p>
             <div class="badge-row">
               <span>Approved shop</span>
               <span>${seller.in_stock_count} in stock</span>
-              <span>Pay by card</span>
+              <span>${seller.accepts_card_payments ? "Pay by card" : "Cards coming soon"}</span>
             </div>
-            <button class="mini-action" type="button" data-choose-seller="${seller.id}">
-              ${selected ? "Shopping here" : "Shop this spot"}
-            </button>
+            <div class="row-actions">
+              <button class="mini-action" type="button" data-choose-seller="${seller.id}">
+                ${selected ? "Shopping here" : "Shop this spot"}
+              </button>
+              ${
+                seller.storefront_path
+                  ? `<a class="soft-action" href="${escapeHtml(seller.storefront_path)}">Shop page</a>`
+                  : ""
+              }
+            </div>
           </article>
         `;
       })
@@ -670,6 +683,9 @@ if (buyerApp) {
       shelfHeading.textContent = `In stock at ${activeSeller.shop_name}`;
     }
     if (pickupFrom) pickupFrom.textContent = activeSeller.shop_name;
+    if (activeSeller.accepts_card_payments === false) {
+      orderMessage.textContent = `${activeSeller.shop_name} is not taking card orders yet. Check back soon.`;
+    }
     renderSellerCards();
     renderProductList();
     filterProducts();
@@ -682,10 +698,14 @@ if (buyerApp) {
     [...cart.values()].reduce((sum, item) => sum + item.priceCents * item.qty, 0);
 
   const updatePlaceOrderButton = () => {
-    const ready = Boolean(activeSeller) && cart.size > 0 && session.isLoggedIn();
+    const acceptsCards = !activeSeller || activeSeller.accepts_card_payments !== false;
+    const ready =
+      Boolean(activeSeller) && acceptsCards && cart.size > 0 && session.isLoggedIn();
     placeOrderButton.disabled = !ready;
     placeOrderButton.classList.toggle("disabled-action", !ready);
-    if (!session.isLoggedIn() && cart.size) {
+    if (!acceptsCards) {
+      placeOrderButton.textContent = "Card orders coming soon";
+    } else if (!session.isLoggedIn() && cart.size) {
       placeOrderButton.textContent = "Sign in to pay";
     } else {
       placeOrderButton.textContent = `Pay ${formatCents(cartTotalCents())} & reserve`;
@@ -777,11 +797,13 @@ if (buyerApp) {
     }
   });
 
-  sellerCards.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-choose-seller]");
-    if (!button) return;
-    selectSeller(Number(button.dataset.chooseSeller));
-  });
+  if (sellerCards) {
+    sellerCards.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-choose-seller]");
+      if (!button) return;
+      selectSeller(Number(button.dataset.chooseSeller));
+    });
+  }
 
   filterButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -814,6 +836,8 @@ if (buyerApp) {
         auth: true,
         body: {
           seller_id: activeSeller.id,
+          // Come back from Stripe to this shop's own page, not the marketplace.
+          return_to: singleShop ? "shop" : "marketplace",
           items: [...cart.values()].map((item) => ({
             candy_id: Number(item.id),
             quantity: item.qty,
@@ -1076,12 +1100,119 @@ if (buyerApp) {
         : "Card via Stripe";
   };
 
+  /* ---------------- single-shop page (/s/<slug>) ---------------- */
+
+  const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+  const shopSlugFromLocation = () => {
+    const match = window.location.pathname.match(/^\/s\/([a-z0-9-]+)\/?$/i);
+    if (match) return match[1].toLowerCase();
+    // Local static servers have no rewrite; shop.html?slug=… works there.
+    return (new URLSearchParams(window.location.search).get("slug") || "").toLowerCase();
+  };
+
+  /* The API only ever stores #rrggbb, but these land in inline CSS, so they
+   * are checked again here rather than trusted. */
+  const applyShopTheme = (theme) => {
+    const root = document.documentElement;
+    if (!theme) return;
+    const primary = HEX_COLOR.test(theme.primary || "") ? theme.primary : null;
+    const accent = HEX_COLOR.test(theme.accent || "") ? theme.accent : null;
+    if (primary) {
+      root.style.setProperty("--cherry", primary);
+      root.style.setProperty("--shop-primary", primary);
+      if (HEX_COLOR.test(theme.on_primary || "")) {
+        root.style.setProperty("--shop-on-primary", theme.on_primary);
+      }
+    }
+    if (accent || primary) {
+      root.style.setProperty("--orange-pop", accent || primary);
+      root.style.setProperty("--shop-accent", accent || primary);
+    }
+    if (accent && HEX_COLOR.test(theme.on_accent || "")) {
+      root.style.setProperty("--shop-on-accent", theme.on_accent);
+    }
+  };
+
+  const renderShopHero = (seller) => {
+    const setText = (selector, text) => {
+      const node = buyerApp.querySelector(selector);
+      if (node) node.textContent = text;
+    };
+    setText("[data-shop-title]", seller.shop_name);
+    setText("[data-shop-neighborhood]", seller.neighborhood);
+    setText("[data-shop-hours]", seller.pickup_window);
+    setText(
+      "[data-shop-payment]",
+      seller.accepts_card_payments ? "Card at checkout" : "Card orders coming soon"
+    );
+    const tagline = buyerApp.querySelector("[data-shop-tagline]");
+    if (tagline) {
+      tagline.textContent = seller.tagline || "";
+      tagline.hidden = !seller.tagline;
+    }
+    const logo = buyerApp.querySelector("[data-shop-logo]");
+    if (logo && seller.logo_url && /^https:\/\//i.test(seller.logo_url)) {
+      logo.src = seller.logo_url;
+      logo.alt = `${seller.shop_name} logo`;
+      logo.hidden = false;
+    }
+    const badges = buyerApp.querySelector("[data-shop-badges]");
+    if (badges) {
+      badges.innerHTML = [
+        "Approved shop",
+        seller.identity_verified ? "ID verified" : null,
+        "Local pickup",
+      ]
+        .filter(Boolean)
+        .map((label) => `<span>${escapeHtml(label)}</span>`)
+        .join("");
+    }
+    document.title = `${seller.shop_name} | The Candy Lady`;
+  };
+
+  const showShopMissing = (message) => {
+    const hero = buyerApp.querySelector("[data-shop-hero]");
+    const missing = buyerApp.querySelector("[data-shop-missing]");
+    if (hero) hero.hidden = true;
+    if (missing) missing.hidden = false;
+    productList.innerHTML = `<p class="empty-state">${escapeHtml(
+      message || "This shop is not available."
+    )}</p>`;
+    updatePlaceOrderButton();
+  };
+
+  const loadSingleShop = async () => {
+    const slug = shopSlugFromLocation();
+    if (!slug) {
+      showShopMissing("No shop was named in this link.");
+      return;
+    }
+    let storefront;
+    try {
+      storefront = await api(`/shops/${encodeURIComponent(slug)}`);
+    } catch (error) {
+      showShopMissing(error.message);
+      return;
+    }
+    // A cart started at a different shop cannot be checked out here.
+    const savedSellerId = storage.get(SELLER_KEY, null);
+    if (cart.size && savedSellerId !== storefront.seller.id) {
+      cart.clear();
+    }
+    activeSeller = storefront.seller;
+    applyShopTheme(activeSeller.theme);
+    renderShopHero(activeSeller);
+    // Re-read through the id route so refreshes after payment share one path.
+    await selectSeller(activeSeller.id, { keepCart: true });
+  };
+
   cart = loadCart();
   renderAccount();
   renderCart();
   loadPlatformConfig();
   refreshAccount();
-  loadSellers().then(handlePaymentReturn);
+  (singleShop ? loadSingleShop() : loadSellers()).then(handlePaymentReturn);
   renderOrderHistory();
 }
 
@@ -1175,7 +1306,11 @@ if (sellerApp) {
             .map((item) => `${item.quantity} × ${escapeHtml(item.candy.name)}`)
             .join(", ");
           const paidLabel =
-            order.payment_status === "paid" ? "Paid by card" : "Pay at pickup (legacy)";
+            order.payment_status !== "paid"
+              ? "Pay at pickup (legacy)"
+              : order.payout_method === "connect"
+              ? "Paid by card · Stripe pays you"
+              : "Paid by card";
           return `
             <article class="order-row" data-order-row data-order-id="${order.id}" data-order-status-value="${order.status}">
               <div>
@@ -1540,6 +1675,212 @@ if (sellerApp) {
     });
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Storefront identity (/s/<slug>)                                   */
+  /* ---------------------------------------------------------------- */
+
+  const storefrontSection = sellerApp.querySelector("[data-storefront-section]");
+  const storefrontForm = sellerApp.querySelector("[data-storefront-form]");
+  const storefrontLink = sellerApp.querySelector("[data-storefront-link]");
+  const storefrontCopy = sellerApp.querySelector("[data-storefront-copy]");
+  const storefrontOpen = sellerApp.querySelector("[data-storefront-open]");
+  const storefrontMessage = sellerApp.querySelector("[data-storefront-message]");
+  const storefrontResetColors = sellerApp.querySelector("[data-storefront-reset-colors]");
+  const STOREFRONT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  // Unchanged colour pickers mean "no custom theme"; see renderStorefront.
+  const DEFAULT_THEME = { primary: "#ff4d6d", accent: "#ff8a3d" };
+  let storefrontThemeCleared = false;
+
+  const publicShopUrl = (path) => new URL(path, window.location.origin).href;
+
+  const renderStorefront = (seller) => {
+    if (!seller || !storefrontSection) return;
+    storefrontSection.hidden = false;
+    const url = seller.storefront_path ? publicShopUrl(seller.storefront_path) : null;
+    const live = url && seller.status === "approved";
+    storefrontLink.textContent = url
+      ? live
+        ? url
+        : `${url} (goes live when your shop is approved)`
+      : "Assigned when your shop is approved";
+    storefrontCopy.hidden = !live;
+    storefrontOpen.hidden = !live;
+    if (live) storefrontOpen.href = seller.storefront_path;
+    storefrontCopy.dataset.url = url || "";
+
+    const theme = seller.theme || {};
+    storefrontForm.elements.slug.value = seller.slug || "";
+    storefrontForm.elements.tagline.value = seller.tagline || "";
+    storefrontForm.elements.logo_url.value = seller.logo_url || "";
+    storefrontForm.elements.theme_primary.value = theme.primary || DEFAULT_THEME.primary;
+    storefrontForm.elements.theme_accent.value = theme.accent || DEFAULT_THEME.accent;
+    storefrontThemeCleared = false;
+  };
+
+  if (storefrontCopy) {
+    storefrontCopy.addEventListener("click", async () => {
+      const url = storefrontCopy.dataset.url;
+      if (!url) return;
+      try {
+        await navigator.clipboard.writeText(url);
+        storefrontMessage.textContent = "Link copied.";
+      } catch {
+        storefrontMessage.textContent = `Copy this link: ${url}`;
+      }
+    });
+  }
+
+  if (storefrontResetColors) {
+    storefrontResetColors.addEventListener("click", () => {
+      storefrontForm.elements.theme_primary.value = DEFAULT_THEME.primary;
+      storefrontForm.elements.theme_accent.value = DEFAULT_THEME.accent;
+      storefrontThemeCleared = true;
+      storefrontMessage.textContent = "Default colours will be used after you save.";
+    });
+  }
+
+  if (storefrontForm) {
+    storefrontForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const elements = storefrontForm.elements;
+      const slug = elements.slug.value.trim().toLowerCase();
+      const body = {
+        tagline: elements.tagline.value.trim(),
+        logo_url: elements.logo_url.value.trim(),
+      };
+      if (slug) {
+        if (!STOREFRONT_SLUG.test(slug) || slug.length < 3 || slug.length > 48) {
+          storefrontMessage.textContent =
+            "Use 3–48 lowercase letters, numbers, and single dashes for the address.";
+          return;
+        }
+        body.slug = slug;
+      }
+      const primary = elements.theme_primary.value.toLowerCase();
+      const accent = elements.theme_accent.value.toLowerCase();
+      const usingDefaults =
+        primary === DEFAULT_THEME.primary && accent === DEFAULT_THEME.accent;
+      body.theme_primary = storefrontThemeCleared || usingDefaults ? null : primary;
+      body.theme_accent = storefrontThemeCleared || usingDefaults ? null : accent;
+
+      storefrontMessage.textContent = "Saving…";
+      try {
+        const seller = await api(`/sellers/${sellerId}/storefront`, {
+          method: "PUT",
+          auth: true,
+          body,
+        });
+        renderStorefront(seller);
+        storefrontMessage.textContent = "Shop page saved.";
+      } catch (error) {
+        storefrontMessage.textContent = error.message || "Could not save the shop page.";
+      }
+    });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Stripe Connect payouts                                           */
+  /* ---------------------------------------------------------------- */
+
+  const connectSection = sellerApp.querySelector("[data-connect-section]");
+  const connectStatusText = sellerApp.querySelector("[data-connect-status]");
+  const connectMessage = sellerApp.querySelector("[data-connect-message]");
+  const connectStartButton = sellerApp.querySelector("[data-connect-start]");
+  const connectDashboardButton = sellerApp.querySelector("[data-connect-dashboard]");
+  const shopPayment = sellerApp.querySelector("[data-shop-payment]");
+
+  const CONNECT_LABELS = {
+    unstarted: "Not connected",
+    onboarding: "Connected — Stripe needs more info",
+    restricted: "Connected — Stripe needs more info",
+    active: "Ready — card orders pay out to you",
+  };
+
+  const renderConnect = (connect) => {
+    if (!connect || !connectSection) return;
+    const ready = connect.status === "active";
+    connectStatusText.textContent = CONNECT_LABELS[connect.status] || connect.status;
+    connectStartButton.hidden = ready;
+    connectStartButton.textContent =
+      connect.status === "unstarted" ? "Connect Stripe" : "Finish Stripe setup";
+    connectDashboardButton.hidden = !connect.details_submitted;
+    if (shopPayment) {
+      shopPayment.textContent = ready ? "Card at checkout" : "Cards off until payouts are set up";
+    }
+    if (!ready && !connectMessage.textContent) {
+      connectMessage.textContent =
+        "Buyers cannot pay by card at your shop until Stripe setup is finished.";
+    } else if (ready) {
+      connectMessage.textContent = "";
+    }
+  };
+
+  const loadConnect = async () => {
+    try {
+      renderConnect(await api(`/sellers/${sellerId}/stripe/status`, { auth: true }));
+    } catch (error) {
+      connectMessage.textContent = error.message || "Could not check payout setup.";
+    }
+  };
+
+  if (connectStartButton) {
+    connectStartButton.addEventListener("click", async () => {
+      connectStartButton.disabled = true;
+      connectMessage.textContent = "Opening Stripe…";
+      try {
+        const payload = await api(`/sellers/${sellerId}/stripe/connect`, {
+          method: "POST",
+          auth: true,
+        });
+        if (payload.url) {
+          window.location.assign(payload.url);
+          return;
+        }
+        renderConnect(payload);
+      } catch (error) {
+        connectMessage.textContent = error.message || "Stripe setup could not start.";
+      }
+      connectStartButton.disabled = false;
+    });
+  }
+
+  if (connectDashboardButton) {
+    connectDashboardButton.addEventListener("click", async () => {
+      connectDashboardButton.disabled = true;
+      try {
+        const payload = await api(`/sellers/${sellerId}/stripe/dashboard`, {
+          method: "POST",
+          auth: true,
+        });
+        if (payload.url) window.open(payload.url, "_blank", "noopener");
+      } catch (error) {
+        connectMessage.textContent = error.message || "Could not open the Stripe dashboard.";
+      }
+      connectDashboardButton.disabled = false;
+    });
+  }
+
+  /* Stripe returns the seller with ?stripe=return when they finish (or leave)
+   * onboarding, and ?stripe=refresh when the one-time link expired. Either way
+   * the only trustworthy answer is the account itself, so ask the API to pull
+   * it; on refresh, go straight back into onboarding with a fresh link. */
+  const handleConnectReturn = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("stripe");
+    if (!outcome) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("stripe");
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    connectMessage.textContent = "Checking your Stripe setup…";
+    await loadConnect();
+    if (outcome === "refresh" && connectStartButton && !connectStartButton.hidden) {
+      connectStartButton.click();
+    } else if (connectStartButton && !connectStartButton.hidden) {
+      connectMessage.textContent =
+        "Stripe still needs a few details before cards can be turned on.";
+    }
+  };
+
   /* Stripe sends the seller back here when they finish. The webhook may not
    * have landed yet (and needs a signing secret configured at all), so ask the
    * API to pull the verdict directly before showing anything. */
@@ -1593,6 +1934,12 @@ if (sellerApp) {
         return;
       }
       renderShopProfile(me.seller);
+      renderStorefront(me.seller);
+      if (connectSection) {
+        connectSection.hidden = false;
+        renderConnect(me.seller && me.seller.connect);
+        handleConnectReturn();
+      }
       loadFeeNote();
       loadSellerDashboard();
     },
@@ -1642,6 +1989,13 @@ if (adminApp) {
       .join("");
   };
 
+  const CONNECT_ADMIN_LABELS = {
+    unstarted: "Stripe not connected",
+    onboarding: "Stripe onboarding started",
+    restricted: "Stripe needs more info",
+    active: "Stripe ready",
+  };
+
   const renderApplications = (applications) => {
     pendingReviewCount.textContent = applications.length;
     if (!applications.length) {
@@ -1659,6 +2013,10 @@ if (adminApp) {
               <p>${escapeHtml(seller.neighborhood)} | ${escapeHtml(seller.pickup_window)}</p>
               <p>Contact: ${escapeHtml(seller.contact_name)} · login ${escapeHtml(
                 seller.contact_email || "not set"
+              )}</p>
+              <p>Payouts: ${escapeHtml(
+                CONNECT_ADMIN_LABELS[seller.connect ? seller.connect.status : "unstarted"] ||
+                  "Unknown"
               )}</p>
             </div>
             <div class="approval-actions">
@@ -1689,8 +2047,11 @@ if (adminApp) {
       <div><span>Platform fee earned</span><strong>${formatCents(
         revenue.platform_fee_cents
       )}</strong></div>
-      <div><span>Owed to sellers</span><strong>${formatCents(
-        revenue.seller_payout_cents
+      <div><span>Paid out by Stripe</span><strong>${formatCents(
+        revenue.connect_seller_payout_cents || 0
+      )}</strong></div>
+      <div><span>Still owed to sellers (pre-Connect)</span><strong>${formatCents(
+        revenue.seller_payout_owed_cents ?? revenue.seller_payout_cents
       )}</strong></div>
       <div><span>Fee rate</span><strong>${escapeHtml(feeLabel || "none")}</strong></div>
     `;
