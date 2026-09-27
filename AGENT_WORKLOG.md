@@ -52,3 +52,81 @@ Get production API out of Stripe test mode so real-card checkout works.
   `STRIPE_CONNECT_WEBHOOK_SECRET` on Render (optional).
 - Seller slug/tagline/theme/logo columns added by boot migration; approved
   shops backfilled with slugs; public page at `/s/<slug>` (vercel rewrite).
+
+## 2026-09-27 — Site audit fixes: dashboard gating, header/footer, forms
+
+### Audit findings (Joshua's click-through)
+- No 404s; header placement consistent. But:
+- **seller.html / admin.html showed their dashboards to logged-out visitors**,
+  and the public header linked to Admin.
+- Password fields on buyer/seller/apply rendered as solid black boxes.
+- buyer.html showed an empty white alert bar between hero and account.
+- Five different header link sets across pages.
+- Footer duplicated itself (Shop/Apply twice, Privacy three times per page);
+  homepage ran the shop/apply CTA three times.
+- "How pickup works" (homepage anchor) vs "Pickup & refunds" (/pickup).
+- buyer.html shop cards had two near-identical buttons.
+- /pickup reportedly rendered an extended version with a TOC, then a short one.
+
+### Root cause of the dashboard exposure
+- styles.css had no global `[hidden]` rule, so class rules such as
+  `.app-layout { display: grid }` overrode the browser's `[hidden]` style and
+  the gated `<main hidden>` showed. **No data leaked:** the dashboards only
+  fetch after `/me` confirms the role, and every seller/admin API route
+  already required a JWT, the role, and (for shop routes) ownership.
+- The same bug produced the empty payment banner on buyer.html.
+
+### Fixes (in the order Joshua set)
+1. Gating: global `[hidden] { display: none !important; }`; logout reloads
+   the page so rendered orders/payouts don't stay in the DOM; Admin removed
+   from public headers; `noindex` on seller.html/admin.html.
+2. Form fields: `color-scheme: light` site-wide, `appearance: none` on
+   `.form-field` inputs, and an autofill override pinning paper/ink colors.
+3. Empty alert bar: fixed by (1).
+4. Header: one set everywhere, Shop · Sell · Apply · Pickup & refunds · FAQ,
+   root-absolute links (work from `/s/<slug>`), current page `aria-current`.
+   "How pickup works" label removed: the homepage anchor it used is a feature
+   list, so /pickup is the single "Pickup & refunds" page.
+5. Footer: one shared footer, each destination once; Terms/Privacy only in the
+   bottom bar; footer CTA buttons removed (homepage CTA now twice, not three
+   times).
+6. /pickup: `"trailingSlash": false` in vercel.json, because
+   `www…/pickup/` (and every pretty URL with a slash) returned 404.
+- Shop cards: kept "Shop this spot" (loads the shelf on buyer.html where cart
+  and checkout live); removed "Shop page". `/s/<slug>` links still work.
+
+### New tests
+- `backend/tests/test_access_control.py` (55 tests): walks the Flask URL map so
+  any non-public route must 401 without a token (new routes are covered
+  automatically unless added to `PUBLIC_ROUTES`); admin routes 403 for buyers
+  and sellers; seller routes 403 for buyers and for another shop's seller;
+  rightful seller/admin still get 200. Checked it fails if a guard is removed.
+- Full backend suite: 189 passed, 5 skipped (Postgres-only).
+
+### Verified vs not reproduced
+- Verified locally (API + static server, browser pane): logged-out
+  seller/admin show only the login form and make no API calls; unauthenticated
+  requests to seller/admin endpoints return 401; a seller token on admin.html
+  is refused after `/me`; logout clears token and DOM; buyer banner hidden;
+  one header/footer set on all 12 pages; all links resolve per vercel.json;
+  no horizontal scroll at 375px.
+- **#2 not reproduced:** production CSS/HTML are byte-identical to the repo and
+  fields render correctly in light and dark mode here. Fix targets the likely
+  causes (dark-scheme native controls, autofill); unconfirmed on Joshua's
+  browser.
+- **#6 not reproduced:** production `/pickup` returned the same short page on
+  every fetch, and no version of pickup.html with a TOC exists in any commit.
+
+### Also this session
+- Committed the last Connect + storefront files (`app.js`, `backend/app.py`,
+  byte-identical to `3ad50ac` / #17) and removed `.agent-staging/` chunks,
+  which reassembled to those same files.
+
+### Still open
+- `trailingSlash` fix can only be verified after a Vercel deploy.
+- The long /pickup version with a TOC is unexplained; need the exact URL
+  (e.g. a preview deployment) if it shows up again.
+- Black password fields: confirm after deploy on the browser/OS that showed it.
+- `backend/models.py.rej` is committed (since `9737b99`) and likely deletable.
+- Local `main` is behind `origin/main`; rebase/merge before opening a PR.
+- Not pushed or deployed.
