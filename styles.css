@@ -1157,29 +1157,6 @@ h3 {
   line-height: 1.6;
 }
 
-.footer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.footer-actions .primary-button,
-.footer-actions .secondary-button {
-  min-height: 44px;
-}
-
-.footer-actions .secondary-button {
-  border: 2px solid rgba(255, 248, 239, 0.55);
-  background: transparent;
-  color: var(--cream);
-}
-
-.footer-actions .secondary-button:hover {
-  border-color: var(--lemon);
-  color: var(--lemon);
-}
-
 .footer-column {
   display: flex;
   flex-direction: column;
