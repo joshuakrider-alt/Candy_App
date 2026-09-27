@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --cherry: #ff4d6d;
   --bubblegum: #ff85b3;
   --lemon: #ffd84d;
@@ -644,6 +645,21 @@ h3 {
   color: var(--ink);
   font: inherit;
   font-weight: 800;
+  /* The site is light-only. Without these, a browser in dark mode may draw
+   * native controls (password fields especially) as dark boxes. */
+  color-scheme: light;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Saved-password autofill paints its own background over ours; an inset
+ * shadow is the one layer it cannot override. */
+.form-field input:-webkit-autofill,
+.form-field input:-webkit-autofill:hover,
+.form-field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  box-shadow: 0 0 0 1000px var(--paper) inset;
+  caret-color: var(--ink);
 }
 
 .form-field textarea {
