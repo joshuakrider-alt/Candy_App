@@ -311,9 +311,11 @@ const initDashboardGate = (root, { roles, wrongRoleMessage, onReady }) => {
   });
 
   if (logoutButton) {
+    // Reload rather than just hide: the rendered orders, payouts and review
+    // queues must not linger in the DOM for the next person at this browser.
     logoutButton.addEventListener("click", () => {
       session.clear();
-      showLogin("Signed out.");
+      window.location.reload();
     });
   }
 
@@ -565,11 +567,6 @@ if (buyerApp) {
               <button class="mini-action" type="button" data-choose-seller="${seller.id}">
                 ${selected ? "Shopping here" : "Shop this spot"}
               </button>
-              ${
-                seller.storefront_path
-                  ? `<a class="soft-action" href="${escapeHtml(seller.storefront_path)}">Shop page</a>`
-                  : ""
-              }
             </div>
           </article>
         `;
