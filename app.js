@@ -311,9 +311,11 @@ const initDashboardGate = (root, { roles, wrongRoleMessage, onReady }) => {
   });
 
   if (logoutButton) {
+    // Reload rather than just hide: the rendered orders, payouts and review
+    // queues must not linger in the DOM for the next person at this browser.
     logoutButton.addEventListener("click", () => {
       session.clear();
-      showLogin("Signed out.");
+      window.location.reload();
     });
   }
 
