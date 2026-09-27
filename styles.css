@@ -18,6 +18,12 @@
   box-sizing: border-box;
 }
 
+/* Class rules like `.app-layout { display: grid }` otherwise beat the
+ * browser's own `[hidden] { display: none }`, un-hiding gated content. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
