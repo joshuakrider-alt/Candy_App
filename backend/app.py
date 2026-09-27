@@ -6,12 +6,15 @@ from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import HTTPException
 
 import accounts
+import connect
 import identity
 import payments
 import storage
+import storefront
 from auth import (
     assert_order_access,
     assert_seller_access,
@@ -130,6 +133,9 @@ def create_app(config_overrides=None):
     app.config["STRIPE_SECRET_KEY"] = os.environ.get("STRIPE_SECRET_KEY", "")
     app.config["STRIPE_PUBLISHABLE_KEY"] = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
     app.config["STRIPE_WEBHOOK_SECRET"] = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    app.config["STRIPE_CONNECT_WEBHOOK_SECRET"] = os.environ.get(
+        "STRIPE_CONNECT_WEBHOOK_SECRET", ""
+    )
     app.config["CURRENCY"] = os.environ.get("CURRENCY", "usd").lower()
     app.config["PLATFORM_FEE_PERCENT"] = _env_float("PLATFORM_FEE_PERCENT", 10)
     app.config["PLATFORM_FEE_FLAT_CENTS"] = _env_int("PLATFORM_FEE_FLAT_CENTS", 0)
@@ -320,6 +326,25 @@ def register_routes(app):
         if missing:
             db.session.commit()
 
+    def slug_taken(candidate, exclude_seller_id=None):
+        query = Seller.query.filter(Seller.slug == candidate)
+        if exclude_seller_id is not None:
+            query = query.filter(Seller.id != exclude_seller_id)
+        return db.session.query(query.exists()).scalar()
+
+    def ensure_seller_slug(seller):
+        """Give a shop its public address the first time it is approved.
+
+        An existing slug is never rewritten here: it may already be printed on
+        a flyer. Only the seller (or an admin) changes it, on purpose.
+        """
+        if not seller.slug:
+            seller.slug = storefront.unique_slug(
+                seller.shop_name,
+                lambda candidate: slug_taken(candidate, seller.id),
+            )
+        return seller.slug
+
     def mark_order_paid(order, session):
         if order.payment_status == "paid":
             return False
@@ -344,10 +369,36 @@ def register_routes(app):
             payload["checkout_url"] = checkout_url
         return payload
 
-    def start_checkout(order, user):
+    def require_connect_ready(seller):
+        """Refuse card checkout for a shop Stripe cannot pay out to yet.
+
+        Money for a new order always goes straight to the shop's Express
+        account. Collecting it on the platform instead would quietly bring back
+        the hand-payout model this replaces, so a shop that has not finished
+        Connect onboarding simply cannot take cards until it does.
+        """
+        if not seller or not seller.accepts_connect_payments:
+            abort(
+                409,
+                description=(
+                    f"{seller.shop_name if seller else 'This shop'} cannot accept "
+                    "card payments yet. The seller needs to finish payout setup."
+                ),
+            )
+        return seller.stripe_account_id
+
+    def start_checkout(order, user, return_to=None):
+        # Decided per session, not per order: the destination is whatever the
+        # shop's account is when the buyer actually pays.
+        destination = require_connect_ready(order.seller)
         session = payments.create_checkout_session(
-            order, user, payments.checkout_return_base(request.headers.get("Origin"))
+            order,
+            user,
+            payments.checkout_return_base(request.headers.get("Origin")),
+            destination_account_id=destination,
+            return_to=return_to,
         )
+        order.stripe_destination_account_id = destination
         order.stripe_checkout_session_id = session["id"]
         order.payment_status = "pending"
         return session["url"]
@@ -671,6 +722,8 @@ def register_routes(app):
             )
 
         seller.status = status
+        if status == "approved":
+            ensure_seller_slug(seller)
         db.session.commit()
         if status == "approved":
             ensure_seller_inventory_rows(seller.id)
@@ -1000,8 +1053,136 @@ def register_routes(app):
         return jsonify(identity_payload(user))
 
     # ------------------------------------------------------------------
+    # Stripe Connect (Express)
+    #
+    # A shop links a connected account through Stripe's hosted onboarding.
+    # Nothing a seller types there (legal name, bank, SSN) reaches this API;
+    # we keep the acct_ id and the two readiness flags Stripe reports.
+    # ------------------------------------------------------------------
+    def connect_payload(seller):
+        payload = seller.connect_dict()
+        payload["seller_id"] = seller.id
+        return payload
+
+    def connect_return_url(outcome):
+        # Same rule as checkout: an allow-listed requesting origin (so local
+        # and preview frontends come back to themselves), else PUBLIC_SITE_URL.
+        base = payments.checkout_return_base(request.headers.get("Origin"))
+        return f"{base}/seller.html?stripe={outcome}"
+
+    @app.route("/sellers/<int:seller_id>/stripe/connect", methods=["POST"])
+    @require_roles("seller", "admin")
+    def start_stripe_connect(seller_id):
+        """Create (or reuse) the shop's Express account and hand back onboarding.
+
+        Calling this again is how a seller resumes an unfinished onboarding or
+        updates details later: the account is reused and a fresh one-time link
+        is issued, since Account Links expire within minutes.
+        """
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        if seller.status == "rejected":
+            abort(400, description="a rejected shop cannot set up payouts")
+
+        if not seller.stripe_account_id:
+            account = connect.create_express_account(seller)
+            seller.stripe_account_id = account["id"]
+            connect.apply_account(seller, account, utcnow())
+            db.session.commit()
+
+        link = connect.create_account_link(
+            seller.stripe_account_id,
+            refresh_url=connect_return_url("refresh"),
+            return_url=connect_return_url("return"),
+        )
+        return jsonify(dict(connect_payload(seller), url=link.get("url"))), 201
+
+    @app.route("/sellers/<int:seller_id>/stripe/status", methods=["GET"])
+    @require_roles("seller", "admin")
+    def get_stripe_connect_status(seller_id):
+        """Pull the account from Stripe and mirror its readiness flags.
+
+        The authenticated counterpart to the account.updated webhook, so a
+        deploy without the Connect webhook still learns when a shop is ready.
+        """
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        if seller.stripe_account_id:
+            account = connect.retrieve_account(seller.stripe_account_id)
+            connect.apply_account(seller, account, utcnow())
+            db.session.commit()
+        return jsonify(connect_payload(seller))
+
+    @app.route("/sellers/<int:seller_id>/stripe/dashboard", methods=["POST"])
+    @require_roles("seller", "admin")
+    def open_stripe_dashboard(seller_id):
+        """One-time link into the shop's Stripe Express dashboard."""
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        if not seller.stripe_account_id or not seller.stripe_details_submitted:
+            abort(400, description="finish payout setup first")
+        link = connect.create_login_link(seller.stripe_account_id)
+        return jsonify(url=link.get("url"))
+
+    # ------------------------------------------------------------------
     # Storefronts
     # ------------------------------------------------------------------
+    def in_stock_counts():
+        """seller_id -> number of distinct items a buyer could order now.
+
+        Counts the same rows the storefront shows: active items that are the
+        platform's or the shop's own, never another shop's custom item.
+        """
+        return dict(
+            db.session.query(SellerInventory.seller_id, func.count(SellerInventory.id))
+            .join(Candy)
+            .filter(
+                SellerInventory.inventory_count > 0,
+                SellerInventory.status.in_(("in-stock", "low-stock")),
+                Candy.is_active.is_(True),
+                or_(
+                    Candy.owner_seller_id.is_(None),
+                    Candy.owner_seller_id == SellerInventory.seller_id,
+                ),
+            )
+            .group_by(SellerInventory.seller_id)
+            .all()
+        )
+
+    @app.route("/shops", methods=["GET"])
+    def list_shops():
+        """Compact directory of approved shops that have a public address.
+
+        For a buyer hub that links out to `/s/<slug>`; lighter than /sellers
+        (no photo gallery) and keyed by slug rather than id.
+        """
+        release_stale_pending_orders()
+        sellers = (
+            Seller.query.filter(Seller.status == "approved", Seller.slug.isnot(None))
+            .order_by(Seller.shop_name)
+            .all()
+        )
+        counts = in_stock_counts()
+        return jsonify(
+            [
+                {
+                    "id": seller.id,
+                    "slug": seller.slug,
+                    "storefront_path": seller.storefront_path,
+                    "shop_name": seller.shop_name,
+                    "tagline": seller.tagline,
+                    "neighborhood": seller.neighborhood,
+                    "pickup_window": seller.pickup_window,
+                    "logo_url": seller.logo_url,
+                    "theme": seller.theme_dict(),
+                    "identity_verified": seller.identity_verified,
+                    "accepts_card_payments": seller.accepts_connect_payments,
+                    "in_stock_count": counts.get(seller.id, 0),
+                }
+                for seller in sellers
+            ]
+        )
+
     @app.route("/sellers", methods=["GET"])
     def list_sellers():
         """Every approved shop a buyer can order from."""
@@ -1009,15 +1190,7 @@ def register_routes(app):
         sellers = (
             Seller.query.filter_by(status="approved").order_by(Seller.shop_name).all()
         )
-        counts = dict(
-            db.session.query(SellerInventory.seller_id, func.count(SellerInventory.id))
-            .filter(
-                SellerInventory.inventory_count > 0,
-                SellerInventory.status.in_(("in-stock", "low-stock")),
-            )
-            .group_by(SellerInventory.seller_id)
-            .all()
-        )
+        counts = in_stock_counts()
         payload = []
         for seller in sellers:
             data = seller.to_dict()
@@ -1045,6 +1218,72 @@ def register_routes(app):
                 "items": [item.to_dict() for item in inventory],
             }
         )
+
+    @app.route("/shops/<slug>", methods=["GET"])
+    def get_shop_by_slug(slug):
+        """The public `/s/<slug>` page's data: one shop, its branding, its shelf.
+
+        Same shape as `/sellers/<id>/storefront`, and the same visibility rule:
+        a shop that is not approved has no public page, whatever its slug.
+        """
+        seller = Seller.query.filter_by(slug=storefront.normalize_slug(slug)).first()
+        if seller is None or seller.status != "approved":
+            abort(404, description="that shop is not available")
+        return get_seller_storefront(seller.id)
+
+    @app.route("/sellers/<int:seller_id>/storefront", methods=["PUT"])
+    @require_roles("seller", "admin")
+    def update_storefront_settings(seller_id):
+        """Edit the shop's public identity: slug, tagline, logo, theme.
+
+        Partial update: only fields present in the body change, and sending
+        null or "" clears an optional field. The slug cannot be cleared once
+        set, only replaced, so an approved shop always has a working link.
+        """
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        data = request.get_json() or {}
+
+        if "slug" in data:
+            slug = storefront.normalize_slug(data.get("slug"))
+            problem = storefront.slug_problem(slug)
+            if problem:
+                abort(400, description=problem)
+            if slug_taken(slug, seller.id):
+                abort(409, description="that address is already taken")
+            seller.slug = slug
+
+        if "tagline" in data:
+            tagline = str(data.get("tagline") or "").strip()
+            if len(tagline) > storefront.TAGLINE_MAX_LENGTH:
+                abort(
+                    400,
+                    description=(
+                        f"tagline must be {storefront.TAGLINE_MAX_LENGTH} characters or fewer"
+                    ),
+                )
+            seller.tagline = tagline or None
+
+        for field in ("theme_primary", "theme_accent"):
+            if field in data:
+                try:
+                    setattr(seller, field, storefront.normalize_hex_color(data.get(field)))
+                except ValueError as error:
+                    abort(400, description=f"{field}: {error}")
+
+        if "logo_url" in data:
+            try:
+                seller.logo_url = storefront.normalize_logo_url(data.get("logo_url"))
+            except ValueError as error:
+                abort(400, description=str(error))
+
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Lost a race for the same slug between the check and the write.
+            db.session.rollback()
+            abort(409, description="that address is already taken")
+        return jsonify(seller.to_dict(include_contact_email=True))
 
     # ------------------------------------------------------------------
     # Seller dashboard
@@ -1260,8 +1499,10 @@ def register_routes(app):
         if seller.status != "approved":
             abort(400, description="orders can only be placed with approved sellers")
 
-        # Fail before touching stock if payments are not wired up.
+        # Fail before touching stock if payments are not wired up, or if this
+        # shop has nowhere for Stripe to send the money.
         payments.require_stripe()
+        require_connect_ready(seller)
 
         # A cart can list the same candy on more than one line. Total them up
         # first so the stock check sees the real demand for each item instead
@@ -1324,7 +1565,7 @@ def register_routes(app):
 
         # If Stripe rejects the session the request aborts here and the
         # uncommitted order (and its stock hold) is discarded on teardown.
-        checkout_url = start_checkout(order, user)
+        checkout_url = start_checkout(order, user, return_to=data.get("return_to"))
         db.session.commit()
         return jsonify(order_response(order, checkout_url=checkout_url)), 201
 
@@ -1349,7 +1590,8 @@ def register_routes(app):
                 mark_order_paid(order, session)
                 return jsonify(order_response(order))
 
-        checkout_url = start_checkout(order, order.user)
+        data = request.get_json(silent=True) or {}
+        checkout_url = start_checkout(order, order.user, return_to=data.get("return_to"))
         db.session.commit()
         return jsonify(order_response(order, checkout_url=checkout_url))
 
@@ -1409,6 +1651,22 @@ def register_routes(app):
         db.session.commit()
         return jsonify(order_response(order))
 
+    @app.route("/admin/orders/<int:order_id>/refund", methods=["POST"])
+    @require_roles("admin")
+    def refund_order(order_id):
+        """Full refund. Connect orders pull the money back from the shop.
+
+        The order flips to "refunded" here as well as on the charge.refunded
+        webhook, so the admin sees the result without waiting on delivery.
+        """
+        order = Order.query.get_or_404(order_id)
+        if order.payment_status != "paid":
+            abort(400, description="only paid orders can be refunded")
+        payments.refund_order(order)
+        order.payment_status = "refunded"
+        db.session.commit()
+        return jsonify(order_response(order))
+
     @app.route("/stripe/webhook", methods=["POST"])
     def stripe_webhook():
         event = payments.construct_webhook_event(
@@ -1423,6 +1681,21 @@ def register_routes(app):
         if (event_type or "").startswith("identity.verification_session."):
             handled = _apply_identity_event(session)
             return jsonify(received=True, handled=handled)
+
+        # A shop's Express account changed (onboarding finished, Stripe asked
+        # for more, charges switched off). Matched on the stored acct_ id only:
+        # metadata is ours, but the id is what Stripe actually vouches for.
+        if event_type == "account.updated":
+            seller = (
+                Seller.query.filter_by(stripe_account_id=session.get("id")).first()
+                if session.get("id")
+                else None
+            )
+            if seller is None:
+                return jsonify(received=True, handled=False)
+            connect.apply_account(seller, session, utcnow())
+            db.session.commit()
+            return jsonify(received=True, handled=True)
 
         order = _order_for_session(session)
         if order is None:
@@ -1509,19 +1782,40 @@ def register_routes(app):
     @app.route("/admin/revenue", methods=["GET"])
     @require_roles("admin")
     def admin_revenue():
-        """What the platform has collected and what it owes sellers."""
+        """What the platform has collected and what it still owes sellers.
+
+        Connect orders (a destination was recorded) were paid out to the shop
+        by Stripe at charge time, so only pre-Connect "manual" orders count
+        toward what the platform owes by hand.
+        """
         paid = Order.query.filter(Order.payment_status == "paid")
-        totals = paid.with_entities(
-            func.coalesce(func.sum(Order.total_cents), 0),
-            func.coalesce(func.sum(Order.platform_fee_cents), 0),
-            func.count(Order.id),
-        ).one()
-        gross_cents, fee_cents, order_count = int(totals[0]), int(totals[1]), int(totals[2])
+
+        def totals(query):
+            row = query.with_entities(
+                func.coalesce(func.sum(Order.total_cents), 0),
+                func.coalesce(func.sum(Order.platform_fee_cents), 0),
+                func.count(Order.id),
+            ).one()
+            return int(row[0]), int(row[1]), int(row[2])
+
+        gross_cents, fee_cents, order_count = totals(paid)
+        connect_gross, connect_fee, connect_count = totals(
+            paid.filter(Order.stripe_destination_account_id.isnot(None))
+        )
+        manual_gross, manual_fee, manual_count = totals(
+            paid.filter(Order.stripe_destination_account_id.is_(None))
+        )
         return jsonify(
             paid_order_count=order_count,
             gross_cents=gross_cents,
             platform_fee_cents=fee_cents,
+            # Every seller share, however it is paid. Kept for compatibility.
             seller_payout_cents=max(0, gross_cents - fee_cents),
+            connect_order_count=connect_count,
+            connect_seller_payout_cents=max(0, connect_gross - connect_fee),
+            manual_order_count=manual_count,
+            # What the platform still has to pay sellers itself.
+            seller_payout_owed_cents=max(0, manual_gross - manual_fee),
             platform_fee_percent=app.config["PLATFORM_FEE_PERCENT"],
             platform_fee_flat_cents=app.config["PLATFORM_FEE_FLAT_CENTS"],
         )
