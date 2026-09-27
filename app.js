@@ -567,11 +567,6 @@ if (buyerApp) {
               <button class="mini-action" type="button" data-choose-seller="${seller.id}">
                 ${selected ? "Shopping here" : "Shop this spot"}
               </button>
-              ${
-                seller.storefront_path
-                  ? `<a class="soft-action" href="${escapeHtml(seller.storefront_path)}">Shop page</a>`
-                  : ""
-              }
             </div>
           </article>
         `;
