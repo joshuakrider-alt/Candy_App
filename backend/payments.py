@@ -258,6 +258,32 @@ def charge_fully_refunded(charge):
     return False
 
 
+def application_fee_refunded_cents(application_fee):
+    """How much of an application fee Stripe has refunded, in cents.
+
+    A charge carries its fee as an id, or as the object when expanded. The
+    fee refund is created together with the charge refund, so reading it when
+    charge.refunded arrives sees the refund that event reports.
+    """
+    if isinstance(application_fee, dict):
+        fee = application_fee
+    elif application_fee:
+        try:
+            fee = to_plain_dict(
+                stripe.ApplicationFee.retrieve(application_fee, api_key=require_stripe())
+            )
+        except stripe.StripeError as error:
+            logger.error("application fee retrieve failed for %s: %s", application_fee, error)
+            # A non-2xx makes Stripe redeliver the webhook later.
+            abort(502, description="Stripe could not report the application fee. Try again.")
+    else:
+        return None
+    refunded = fee.get("amount_refunded")
+    if isinstance(refunded, int) and not isinstance(refunded, bool):
+        return refunded
+    return None
+
+
 def refund_order(order):
     """Fully refund an order's payment through Stripe.
 

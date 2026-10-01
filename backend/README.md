@@ -245,8 +245,14 @@ way `charge.refunded` still flips the order to `refunded`, but only for a full
 refund (`refunded: true` on the charge). A partial refund made in the Dashboard
 leaves the order `paid` and in the pickup queue, and records the amount in
 `order.refunded_cents`, which comes off the order's net total, the seller
-payout and the revenue totals. The platform fee is left as recorded: whether
-Stripe returned part of it depends on the "Refund application fee" box. Webhook
+payout and the revenue totals. When the refund also returned part of the
+platform fee ("Refund application fee"), the handler reads the fee's refunded
+amount from Stripe into `order.platform_fee_refunded_cents`, and the platform
+fee and seller payout are both computed from the net fee. An admin refund of a
+Connect order returns the whole fee. Orders refunded before these columns
+existed keep `refunded_cents = 0`: the old handler marked partial refunds
+`refunded` too, so the amount is unknown rather than assumed, and a later
+`charge.refunded` for the order records it. Webhook
 delivery order is not guaranteed, so a refund is recorded even if it arrives
 before the payment it reverses; the later completion then marks the order
 `refunded` and releases its stock. A `charge.refunded` that matches no order

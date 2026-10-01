@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, event, text
 
 import payments
 from app import DEFAULT_JWT_SECRET, create_app
+from migrations import run_migrations
 from models import Order, SellerInventory, db, utcnow
 from test_payments import (
     WEBHOOK_SECRET,
@@ -630,6 +631,97 @@ def test_seller_payout_totals_clamp_each_order_at_zero(webhook_app, fake_stripe)
     revenue = admin.get("/admin/revenue").get_json()
     assert revenue["seller_payout_cents"] == intact["seller_payout_cents"]
     assert revenue["connect_seller_payout_cents"] == intact["seller_payout_cents"]
+
+
+def test_a_refund_that_also_returns_the_fee_is_netted_out_of_both_sides(
+    webhook_app, fake_stripe, monkeypatch
+):
+    client = webhook_app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    admin = login(client, "admin@example.com", ADMIN_PASSWORD)
+    _seller, _item, order = paid_order(client, buyer, fake_stripe, quantity=2)
+    before = admin.get("/admin/revenue").get_json()
+
+    # Half the order refunded with "Refund application fee": Stripe returns
+    # half the fee to the shop.
+    refund = order["total_cents"] // 2
+    fee_back = order["platform_fee_cents"] // 2
+    monkeypatch.setattr(
+        payments.stripe.ApplicationFee,
+        "retrieve",
+        lambda fee_id, **_kwargs: {"id": fee_id, "amount_refunded": fee_back},
+    )
+    event = charge_refunded_event(
+        f"pi_test_{fake_stripe.last_session_id}", order["total_cents"], refund
+    )
+    event["data"]["object"]["application_fee"] = "fee_test_1"
+    body, headers = signed_webhook(event)
+    assert client.post("/stripe/webhook", data=body, headers=headers).status_code == 200
+
+    row = buyer.get(f"/orders/{order['id']}").get_json()
+    assert row["platform_fee_refunded_cents"] == fee_back
+    expected_payout = (order["total_cents"] - refund) - (order["platform_fee_cents"] - fee_back)
+    assert row["seller_payout_cents"] == expected_payout
+
+    after = admin.get("/admin/revenue").get_json()
+    assert after["platform_fee_cents"] == before["platform_fee_cents"] - fee_back
+    assert after["connect_seller_payout_cents"] == (
+        before["connect_seller_payout_cents"] - order["seller_payout_cents"] + expected_payout
+    )
+
+
+def test_an_admin_refund_of_a_connect_order_returns_the_whole_fee(
+    webhook_app, fake_stripe, stub_refunds
+):
+    client = webhook_app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    admin = login(client, "admin@example.com", ADMIN_PASSWORD)
+    _seller, _item, order = paid_order(client, buyer, fake_stripe)
+    refunded = admin.post(f"/admin/orders/{order['id']}/refund").get_json()
+    assert refunded["platform_fee_refunded_cents"] == order["platform_fee_cents"]
+    assert stub_refunds[-1]["refund_application_fee"] is True
+
+
+def test_a_refund_event_records_the_real_amount_on_an_order_already_refunded(
+    webhook_app, fake_stripe
+):
+    """The old handler marked partial refunds "refunded" without an amount."""
+    client = webhook_app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    _seller, _item, order = paid_order(client, buyer, fake_stripe)
+    with webhook_app.app_context():
+        row = db.session.get(Order, order["id"])
+        row.payment_status = "refunded"
+        row.refunded_cents = 0
+        db.session.commit()
+
+    body, headers = signed_webhook(
+        charge_refunded_event(f"pi_test_{fake_stripe.last_session_id}", order["total_cents"], 100)
+    )
+    client.post("/stripe/webhook", data=body, headers=headers)
+    after = buyer.get(f"/orders/{order['id']}").get_json()
+    assert after["refunded_cents"] == 100
+    assert after["payment_status"] == "refunded"
+
+
+def test_upgrading_does_not_guess_the_amount_of_an_old_refund(app, client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    order = place_order(buyer, seller_id, item["candy_id"]).get_json()
+
+    with app.app_context():
+        db.session.get(Order, order["id"]).payment_status = "refunded"
+        db.session.commit()
+        # Back to the previous release's schema, then boot-migrate again.
+        with db.engine.begin() as connection:
+            for column in ("refunded_cents", "platform_fee_refunded_cents"):
+                connection.execute(text(f'ALTER TABLE "order" DROP COLUMN {column}'))
+        db.session.remove()
+        run_migrations()
+        db.session.remove()
+        row = db.session.get(Order, order["id"])
+        assert row.payment_status == "refunded"
+        assert row.refunded_cents == 0
 
 
 # --- A mistyped password does not sign the person out ---------------------------

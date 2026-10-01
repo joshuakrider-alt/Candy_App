@@ -204,6 +204,14 @@ Vercel settings were changed. Not deployed.
   session if the order was released meanwhile.
 - Seller payout totals clamp each order at zero before summing.
 
+### Third Codex review
+- No backfill of `refunded_cents` for orders already `refunded`: the old
+  handler marked partial refunds that way too, so the amount stays unknown (0)
+  until a `charge.refunded` for the order records it.
+- New `order.platform_fee_refunded_cents`, read from Stripe's application fee
+  on `charge.refunded` (no new webhook subscription needed). Revenue and seller
+  payouts use the net fee.
+
 ### Deploy note
 - Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
   new deploy will fail to start (Render keeps the previous deploy serving).

@@ -1879,6 +1879,10 @@ def register_routes(app):
         payments.refund_order(order)
         order.payment_status = "refunded"
         order.refunded_cents = order.total_cents
+        # A Connect refund is made with refund_application_fee=true, so the
+        # whole fee goes back to the shop along with the full refund.
+        if order.stripe_destination_account_id:
+            order.platform_fee_refunded_cents = order.platform_fee_cents
         db.session.commit()
         return jsonify(order_response(order))
 
@@ -1944,8 +1948,11 @@ def register_routes(app):
         elif event_type == "charge.refunded":
             order = lock_order(order)
             # Recorded whatever the payment state: the refund can arrive
-            # before the completion it belongs to (mark_order_paid honours it).
-            if order.payment_status in ("paid",) + PAYABLE_PAYMENT_STATUSES:
+            # before the completion it belongs to (mark_order_paid honours it),
+            # and an order already "refunded" may only have been partly
+            # refunded under the old handler, so its real amount is taken too.
+            # Amounts only ever grow, so a redelivered event changes nothing.
+            if order.payment_status in ("paid", "refunded") + PAYABLE_PAYMENT_STATUSES:
                 # Sent for partial refunds too. Those leave goods to hand
                 # over, so the order stays in the pickup queue, but the amount
                 # is recorded so revenue and payouts stop counting it.
@@ -1953,6 +1960,14 @@ def register_routes(app):
                 if isinstance(refunded, int) and not isinstance(refunded, bool):
                     order.refunded_cents = max(
                         order.refunded_cents or 0, min(refunded, order.total_cents or 0)
+                    )
+                fee_refunded = payments.application_fee_refunded_cents(
+                    session.get("application_fee")
+                )
+                if fee_refunded is not None:
+                    order.platform_fee_refunded_cents = max(
+                        order.platform_fee_refunded_cents or 0,
+                        min(fee_refunded, order.platform_fee_cents or 0),
                     )
                 if payments.charge_fully_refunded(session):
                     order.refunded_cents = order.total_cents
@@ -2036,19 +2051,18 @@ def register_routes(app):
         paid = Order.query.filter(Order.payment_status == "paid")
 
         net_total = Order.total_cents - func.coalesce(Order.refunded_cents, 0)
+        # The fee Stripe kept for the platform, after any fee refund.
+        net_fee = Order.platform_fee_cents - func.coalesce(Order.platform_fee_refunded_cents, 0)
         # Clamped per order, like Order.seller_payout_cents: a heavily refunded
         # order owes its seller nothing, and must not reduce other orders' share.
-        seller_share = case(
-            (net_total - Order.platform_fee_cents > 0, net_total - Order.platform_fee_cents),
-            else_=0,
-        )
+        seller_share = case((net_total - net_fee > 0, net_total - net_fee), else_=0)
 
         def totals(query):
             # Gross is net of partial refunds; a fully refunded order is not
             # "paid" and is excluded altogether.
             row = query.with_entities(
                 func.coalesce(func.sum(net_total), 0),
-                func.coalesce(func.sum(Order.platform_fee_cents), 0),
+                func.coalesce(func.sum(net_fee), 0),
                 func.count(Order.id),
                 func.coalesce(func.sum(seller_share), 0),
             ).one()

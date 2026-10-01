@@ -479,6 +479,10 @@ class Order(db.Model):
     # refund leaves the order "paid" (there is still something to hand over),
     # so reporting needs the amount, not just the status.
     refunded_cents = db.Column(db.Integer, nullable=False, default=0)
+    # How much of platform_fee_cents Stripe gave back to the shop. A refund
+    # with "Refund application fee" returns the fee in proportion, so the
+    # platform's take and the seller's share both move.
+    platform_fee_refunded_cents = db.Column(db.Integer, nullable=False, default=0)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")
@@ -495,8 +499,12 @@ class Order(db.Model):
         return max(0, (self.total_cents or 0) - (self.refunded_cents or 0))
 
     @property
+    def net_platform_fee_cents(self):
+        return max(0, (self.platform_fee_cents or 0) - (self.platform_fee_refunded_cents or 0))
+
+    @property
     def seller_payout_cents(self):
-        return max(0, self.net_total_cents - (self.platform_fee_cents or 0))
+        return max(0, self.net_total_cents - self.net_platform_fee_cents)
 
     @property
     def payout_method(self):
@@ -515,6 +523,7 @@ class Order(db.Model):
             "status": self.status,
             "total_cents": self.total_cents,
             "refunded_cents": self.refunded_cents or 0,
+            "platform_fee_refunded_cents": self.platform_fee_refunded_cents or 0,
             "payment_status": self.payment_status,
             "platform_fee_cents": self.platform_fee_cents,
             "seller_payout_cents": self.seller_payout_cents,
