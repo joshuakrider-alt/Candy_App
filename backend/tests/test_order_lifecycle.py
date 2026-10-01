@@ -387,6 +387,35 @@ def test_the_stock_reservation_is_committed_before_stripe_is_called(
     assert seen["count"] == item["inventory_count"] - 2
 
 
+def test_an_order_released_while_stripe_answers_does_not_go_live(
+    app, client, buyer, kiki_seller, fake_stripe, monkeypatch
+):
+    """Account deletion can release a new order during the Stripe call."""
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    original = fake_stripe.create_session
+
+    def released_meanwhile(**params):
+        order_id = int(params["client_reference_id"])
+        Order.query.filter_by(id=order_id).update(
+            {"payment_status": "expired", "inventory_released_at": utcnow()},
+            synchronize_session=False,
+        )
+        db.session.commit()
+        return original(**params)
+
+    monkeypatch.setattr(payments.stripe.checkout.Session, "create", released_meanwhile)
+    response = place_order(buyer, seller_id, item["candy_id"])
+    assert response.status_code == 409
+    session_id = fake_stripe.last_session_id
+    assert session_id in fake_stripe.expired_sessions
+
+    with app.app_context():
+        order = Order.query.order_by(Order.id.desc()).first()
+        assert order.payment_status == "expired"
+        assert order.stripe_checkout_session_id != session_id
+
+
 # --- Retiring a catalog item ---------------------------------------------------
 
 
@@ -543,6 +572,64 @@ def test_a_partial_refund_keeps_the_order_collectable(webhook_app, fake_stripe):
     full = buyer.get(f"/orders/{order['id']}").get_json()
     assert full["payment_status"] == "refunded"
     assert full["refunded_cents"] == order["total_cents"]
+
+
+def test_a_full_refund_that_arrives_before_the_payment_wins(webhook_app, fake_stripe):
+    client = webhook_app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    seller = client.get("/sellers").get_json()[0]
+    item = first_in_stock_item(client, seller["id"])
+    start = item["inventory_count"]
+    order = place_order(buyer, seller["id"], item["candy_id"], quantity=2).get_json()
+    session_id = fake_stripe.last_session_id
+    fake_stripe.mark_paid(session_id)
+
+    refund = charge_refunded_event(
+        f"pi_test_{session_id}", order["total_cents"], order["total_cents"]
+    )
+    refund["data"]["object"]["metadata"] = {"order_id": str(order["id"])}
+    body, headers = signed_webhook(refund)
+    assert client.post("/stripe/webhook", data=body, headers=headers).status_code == 200
+    assert buyer.get(f"/orders/{order['id']}").get_json()["payment_status"] == "pending"
+
+    body, headers = signed_webhook(
+        checkout_completed_event(session_id, order["id"], seller["id"])
+    )
+    client.post("/stripe/webhook", data=body, headers=headers)
+    final = buyer.get(f"/orders/{order['id']}").get_json()
+    assert final["payment_status"] == "refunded"
+    assert final["pickup_code"] is None
+    assert final["refunded_cents"] == order["total_cents"]
+    assert inventory_count(client, seller["id"], item["candy_id"]) == start
+
+
+def test_a_refund_for_an_unknown_payment_is_left_for_stripe_to_redeliver(webhook_app, fake_stripe):
+    client = webhook_app.test_client()
+    body, headers = signed_webhook(charge_refunded_event("pi_test_not_seen_yet", 500, 500))
+    response = client.post("/stripe/webhook", data=body, headers=headers)
+    assert response.status_code == 409
+
+
+def test_seller_payout_totals_clamp_each_order_at_zero(webhook_app, fake_stripe):
+    client = webhook_app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    admin = login(client, "admin@example.com", ADMIN_PASSWORD)
+    _seller, _item, heavy = paid_order(client, buyer, fake_stripe)
+    heavy_intent = f"pi_test_{fake_stripe.last_session_id}"
+    _seller, _item, intact = paid_order(client, buyer, fake_stripe)
+
+    # Refund more than the seller's share, but not the whole order.
+    refunded = heavy["total_cents"] - heavy["platform_fee_cents"] + 5
+    assert refunded < heavy["total_cents"]
+    body, headers = signed_webhook(
+        charge_refunded_event(heavy_intent, heavy["total_cents"], refunded)
+    )
+    client.post("/stripe/webhook", data=body, headers=headers)
+    assert buyer.get(f"/orders/{heavy['id']}").get_json()["seller_payout_cents"] == 0
+
+    revenue = admin.get("/admin/revenue").get_json()
+    assert revenue["seller_payout_cents"] == intact["seller_payout_cents"]
+    assert revenue["connect_seller_payout_cents"] == intact["seller_payout_cents"]
 
 
 # --- A mistyped password does not sign the person out ---------------------------

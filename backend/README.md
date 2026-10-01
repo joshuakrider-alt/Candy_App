@@ -156,7 +156,9 @@ tab left open cannot pay for released stock. If Stripe reports the buyer paid
 just before the cancel, the order is marked paid and cancel answers 409.
 
 `POST /orders` commits the stock reservation before calling Stripe, so row
-locks are not held across the network call. If Stripe then fails, the stock
+locks are not held across the network call. Once Stripe answers, the order is re-locked and
+re-checked; if it was released meanwhile (the buyer deleted their account),
+the new session is expired and the call answers 409. If Stripe then fails, the stock
 goes back on the shelf and the order is marked `expired`.
 
 Every payment-state change locks the order row first (then its inventory
@@ -244,8 +246,13 @@ refund (`refunded: true` on the charge). A partial refund made in the Dashboard
 leaves the order `paid` and in the pickup queue, and records the amount in
 `order.refunded_cents`, which comes off the order's net total, the seller
 payout and the revenue totals. The platform fee is left as recorded: whether
-Stripe returned part of it depends on the "Refund application fee" box. Partial
-refunds are not supported in the API yet.
+Stripe returned part of it depends on the "Refund application fee" box. Webhook
+delivery order is not guaranteed, so a refund is recorded even if it arrives
+before the payment it reverses; the later completion then marks the order
+`refunded` and releases its stock. A `charge.refunded` that matches no order
+yet answers 409 so Stripe redelivers it once the payment is recorded. Seller
+payout totals clamp each order at zero, so a heavily refunded order never
+reduces other orders' share. Partial refunds are not supported in the API yet.
 
 ## Storefront identity
 

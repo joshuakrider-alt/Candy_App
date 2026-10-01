@@ -5,7 +5,7 @@ from datetime import timedelta
 from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import HTTPException
 
@@ -467,6 +467,15 @@ def register_routes(app):
             payment_intent = payment_intent.get("id")
         if payment_intent:
             order.stripe_payment_intent_id = payment_intent
+        # Stripe does not promise delivery order: a full refund can arrive
+        # before the completion it reverses. Then the money is already back
+        # with the buyer, so the order is refunded, not collectable.
+        if order.total_cents and (order.refunded_cents or 0) >= order.total_cents:
+            if order.inventory_released_at is None:
+                release_order_inventory(order)
+            order.payment_status = "refunded"
+            db.session.commit()
+            return True
         # The buyer paid, so the units belong to this order even if a sweep
         # already returned them to the shelf.
         if order.inventory_released_at is not None:
@@ -499,7 +508,12 @@ def register_routes(app):
             )
         return seller.stripe_account_id
 
-    def start_checkout(order, user, return_to=None):
+    def open_checkout_session(order, user, return_to=None):
+        """Ask Stripe for a Checkout Session. Changes nothing on the order.
+
+        Kept apart from apply_checkout_session so a caller that does not hold
+        the order lock during the Stripe call can re-check the order first.
+        """
         # Decided per session, not per order: the destination is whatever the
         # shop's account is when the buyer actually pays.
         destination = require_connect_ready(order.seller)
@@ -510,11 +524,19 @@ def register_routes(app):
             destination_account_id=destination,
             return_to=return_to,
         )
+        return session, destination
+
+    def apply_checkout_session(order, session, destination):
         order.stripe_destination_account_id = destination
         order.stripe_checkout_session_id = session["id"]
         order.payment_status = "pending"
         order.checkout_started_at = utcnow()
         return session["url"]
+
+    def start_checkout(order, user, return_to=None):
+        """Open and record a session. Only for a caller holding the order lock."""
+        session, destination = open_checkout_session(order, user, return_to)
+        return apply_checkout_session(order, session, destination)
 
     # ------------------------------------------------------------------
     # Public config and health
@@ -1715,14 +1737,30 @@ def register_routes(app):
         db.session.commit()
 
         try:
-            checkout_url = start_checkout(order, user, return_to=data.get("return_to"))
+            session, destination = open_checkout_session(
+                order, user, return_to=data.get("return_to")
+            )
         except Exception:
-            # Stripe refused or failed: give the stock back straight away.
+            # Stripe refused or failed: give the stock back straight away,
+            # unless something else (account deletion) already did.
             db.session.rollback()
-            release_order_inventory(order)
-            order.payment_status = "expired"
+            order = lock_order(order)
+            if order.inventory_released_at is None:
+                release_order_inventory(order)
+            if order.payment_status in OPEN_PAYMENT_STATUSES:
+                order.payment_status = "expired"
             db.session.commit()
             raise
+
+        # The order was visible to other requests while Stripe answered. If
+        # one of them released it (the buyer deleted their account), its stock
+        # is back on the shelf, so the new session must not go live.
+        order = lock_order(order)
+        if order.payment_status != "pending" or order.inventory_released_at is not None:
+            payments.expire_checkout_session(session.get("id"))
+            db.session.commit()
+            abort(409, description="this order was cancelled while checkout was opening")
+        checkout_url = apply_checkout_session(order, session, destination)
         db.session.commit()
         return jsonify(order_response(order, checkout_url=checkout_url)), 201
 
@@ -1876,6 +1914,11 @@ def register_routes(app):
 
         order = _order_for_session(session)
         if order is None:
+            if event_type == "charge.refunded" and session.get("payment_intent"):
+                # Probably a refund that overtook its checkout.session.completed:
+                # until that lands, the order does not know its payment intent.
+                # A non-2xx makes Stripe redeliver this later instead of losing it.
+                return jsonify(received=True, handled=False, retry=True), 409
             return jsonify(received=True, handled=False)
 
         if event_type == "checkout.session.completed":
@@ -1900,7 +1943,9 @@ def register_routes(app):
             db.session.commit()
         elif event_type == "charge.refunded":
             order = lock_order(order)
-            if order.payment_status == "paid":
+            # Recorded whatever the payment state: the refund can arrive
+            # before the completion it belongs to (mark_order_paid honours it).
+            if order.payment_status in ("paid",) + PAYABLE_PAYMENT_STATUSES:
                 # Sent for partial refunds too. Those leave goods to hand
                 # over, so the order stays in the pickup queue, but the amount
                 # is recorded so revenue and payouts stop counting it.
@@ -1910,8 +1955,9 @@ def register_routes(app):
                         order.refunded_cents or 0, min(refunded, order.total_cents or 0)
                     )
                 if payments.charge_fully_refunded(session):
-                    order.payment_status = "refunded"
                     order.refunded_cents = order.total_cents
+                    if order.payment_status == "paid":
+                        order.payment_status = "refunded"
             db.session.commit()
 
         return jsonify(received=True, handled=True)
@@ -1989,17 +2035,24 @@ def register_routes(app):
         """
         paid = Order.query.filter(Order.payment_status == "paid")
 
+        net_total = Order.total_cents - func.coalesce(Order.refunded_cents, 0)
+        # Clamped per order, like Order.seller_payout_cents: a heavily refunded
+        # order owes its seller nothing, and must not reduce other orders' share.
+        seller_share = case(
+            (net_total - Order.platform_fee_cents > 0, net_total - Order.platform_fee_cents),
+            else_=0,
+        )
+
         def totals(query):
             # Gross is net of partial refunds; a fully refunded order is not
             # "paid" and is excluded altogether.
             row = query.with_entities(
-                func.coalesce(
-                    func.sum(Order.total_cents - func.coalesce(Order.refunded_cents, 0)), 0
-                ),
+                func.coalesce(func.sum(net_total), 0),
                 func.coalesce(func.sum(Order.platform_fee_cents), 0),
                 func.count(Order.id),
+                func.coalesce(func.sum(seller_share), 0),
             ).one()
-            return int(row[0]), int(row[1]), int(row[2])
+            return int(row[0]), int(row[1]), int(row[2]), int(row[3])
 
         partially_refunded_cents = int(
             paid.with_entities(
@@ -2007,11 +2060,11 @@ def register_routes(app):
             ).scalar()
         )
 
-        gross_cents, fee_cents, order_count = totals(paid)
-        connect_gross, connect_fee, connect_count = totals(
+        gross_cents, fee_cents, order_count, payout_cents = totals(paid)
+        _, _, connect_count, connect_payout = totals(
             paid.filter(Order.stripe_destination_account_id.isnot(None))
         )
-        manual_gross, manual_fee, manual_count = totals(
+        _, _, manual_count, manual_payout = totals(
             paid.filter(Order.stripe_destination_account_id.is_(None))
         )
         return jsonify(
@@ -2022,12 +2075,12 @@ def register_routes(app):
             partially_refunded_cents=partially_refunded_cents,
             platform_fee_cents=fee_cents,
             # Every seller share, however it is paid. Kept for compatibility.
-            seller_payout_cents=max(0, gross_cents - fee_cents),
+            seller_payout_cents=payout_cents,
             connect_order_count=connect_count,
-            connect_seller_payout_cents=max(0, connect_gross - connect_fee),
+            connect_seller_payout_cents=connect_payout,
             manual_order_count=manual_count,
             # What the platform still has to pay sellers itself.
-            seller_payout_owed_cents=max(0, manual_gross - manual_fee),
+            seller_payout_owed_cents=manual_payout,
             platform_fee_percent=app.config["PLATFORM_FEE_PERCENT"],
             platform_fee_flat_cents=app.config["PLATFORM_FEE_FLAT_CENTS"],
         )

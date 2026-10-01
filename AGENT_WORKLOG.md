@@ -197,6 +197,13 @@ Vercel settings were changed. Not deployed.
 - New `order.refunded_cents` column records partial refunds; revenue and
   seller payouts are net of them.
 
+### Second Codex review
+- A refund delivered before its payment completion is recorded and honoured;
+  an unmatched `charge.refunded` answers 409 so Stripe redelivers it.
+- `POST /orders` re-checks the order after the Stripe call and expires the new
+  session if the order was released meanwhile.
+- Seller payout totals clamp each order at zero before summing.
+
 ### Deploy note
 - Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
   new deploy will fail to start (Render keeps the previous deploy serving).
