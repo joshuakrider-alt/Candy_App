@@ -47,11 +47,17 @@ def assert_self_deletable(user):
 
 def orders_to_release(user):
     """The user's checkouts that still hold stock nobody will pay for."""
-    return Order.query.filter(
-        Order.user_id == user.id,
-        Order.payment_status.in_(CANCELLABLE_PAYMENT_STATUSES),
-        Order.inventory_released_at.is_(None),
-    ).all()
+    # Locked so a payment arriving at the same moment waits for this delete
+    # instead of re-reserving stock that is being handed back.
+    return (
+        Order.query.filter(
+            Order.user_id == user.id,
+            Order.payment_status.in_(CANCELLABLE_PAYMENT_STATUSES),
+            Order.inventory_released_at.is_(None),
+        )
+        .with_for_update()
+        .all()
+    )
 
 
 def delete_account(user):

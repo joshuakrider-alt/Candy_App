@@ -431,6 +431,7 @@ def test_admin_revenue_counts_only_paid_orders(client, buyer, admin, kiki_seller
     assert empty == {
         "paid_order_count": 0,
         "gross_cents": 0,
+        "partially_refunded_cents": 0,
         "platform_fee_cents": 0,
         "seller_payout_cents": 0,
         "connect_order_count": 0,

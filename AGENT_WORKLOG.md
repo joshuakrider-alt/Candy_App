@@ -190,6 +190,13 @@ Vercel settings were changed. Not deployed.
 - The API refuses to boot against a non-SQLite database with the default
   `JWT_SECRET_KEY`.
 
+### Review follow-up (Codex review on PR #19)
+- Payment-state changes lock the order row first, so concurrent confirms
+  cannot reserve stock twice and concurrent resumes open one session.
+- A paid completion is accepted for any of the order's sessions.
+- New `order.refunded_cents` column records partial refunds; revenue and
+  seller payouts are net of them.
+
 ### Deploy note
 - Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
   new deploy will fail to start (Render keeps the previous deploy serving).

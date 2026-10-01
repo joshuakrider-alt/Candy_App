@@ -75,6 +75,7 @@ NEW_COLUMNS = (
     # NULL for orders from before this column; the sweep falls back to
     # created_at for those.
     ("order", "checkout_started_at", "TIMESTAMP"),
+    ("order", "refunded_cents", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -377,6 +378,12 @@ def _backfill(existing_tables, added):
         statements.append(
             f"UPDATE {_quote('order')} SET currency = 'usd' WHERE currency IS NULL"
         )
+        # Orders refunded before the amount was tracked were full refunds.
+        if ("order", "refunded_cents") in added:
+            statements.append(
+                f"UPDATE {_quote('order')} SET refunded_cents = total_cents "
+                "WHERE payment_status = 'refunded'"
+            )
 
     with db.engine.begin() as connection:
         for statement in statements:

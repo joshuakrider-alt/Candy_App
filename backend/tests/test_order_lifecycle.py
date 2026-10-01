@@ -3,6 +3,9 @@
 Each test pins one defect found in the 2026-10-01 logic review.
 """
 
+import os
+import threading
+import time
 from datetime import timedelta
 
 import pytest
@@ -94,6 +97,7 @@ def test_reconfirming_a_refunded_order_does_not_mark_it_paid_again(
 
     refunded = admin.post(f"/admin/orders/{order['id']}/refund").get_json()
     assert refunded["payment_status"] == "refunded"
+    assert refunded["refunded_cents"] == order["total_cents"]
 
     # The buyer reloads Stripe's return page; the session still says "paid".
     again = buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()
@@ -141,20 +145,113 @@ def test_a_late_expired_event_for_a_replaced_session_leaves_the_live_one_alone(
     assert inventory_count(client, seller["id"], item["candy_id"]) == start - 2
 
 
-def test_a_completed_event_for_another_session_does_not_mark_the_order_paid(
+def test_a_paid_session_that_lost_a_resume_race_still_marks_the_order_paid(
     webhook_app, fake_stripe
 ):
+    """Two overlapping resumes can each open a session; only one id is stored.
+
+    If the buyer pays the other one, that is still this order's money.
+    """
     client = webhook_app.test_client()
     buyer = login(client, "alice@example.com", BUYER_PASSWORD)
     seller = client.get("/sellers").get_json()[0]
     item = first_in_stock_item(client, seller["id"])
     order = place_order(buyer, seller["id"], item["candy_id"]).get_json()
+    paid_session = fake_stripe.last_session_id
 
+    with webhook_app.app_context():
+        row = db.session.get(Order, order["id"])
+        row.stripe_checkout_session_id = "cs_test_won_the_race"
+        db.session.commit()
+
+    fake_stripe.mark_paid(paid_session)
     body, headers = signed_webhook(
-        checkout_completed_event("cs_test_somebody_else", order["id"], seller["id"])
+        checkout_completed_event(paid_session, order["id"], seller["id"])
     )
-    client.post("/stripe/webhook", data=body, headers=headers)
-    assert buyer.get(f"/orders/{order['id']}").get_json()["payment_status"] == "pending"
+    assert client.post("/stripe/webhook", data=body, headers=headers).get_json()["handled"]
+
+    paid = buyer.get(f"/orders/{order['id']}").get_json()
+    assert paid["payment_status"] == "paid"
+    assert paid["pickup_code"]
+    with webhook_app.app_context():
+        # The paid session becomes the current one, so confirm reads it.
+        assert db.session.get(Order, order["id"]).stripe_checkout_session_id == paid_session
+
+
+postgres_only = pytest.mark.skipif(
+    not os.environ.get("TEST_DATABASE_URL"),
+    reason="row locks need Postgres; SQLite serializes writers differently",
+)
+
+
+def run_together(*calls):
+    results = [None] * len(calls)
+    barrier = threading.Barrier(len(calls))
+
+    def run(index, call):
+        barrier.wait()
+        results[index] = call()
+
+    threads = [threading.Thread(target=run, args=(i, c)) for i, c in enumerate(calls)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    return results
+
+
+@postgres_only
+def test_overlapping_resumes_open_only_one_new_session(app, client, buyer, kiki_seller, fake_stripe, monkeypatch):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    order = place_order(buyer, seller_id, item["candy_id"]).get_json()
+    fake_stripe.mark_expired(fake_stripe.last_session_id)
+    before = len(fake_stripe.created_sessions)
+
+    original = fake_stripe.create_session
+
+    def slow_create(**params):
+        time.sleep(0.5)
+        return original(**params)
+
+    monkeypatch.setattr(payments.stripe.checkout.Session, "create", slow_create)
+    url = f"/orders/{order['id']}/checkout"
+    first, second = run_together(lambda: buyer.post(url), lambda: buyer.post(url))
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert len(fake_stripe.created_sessions) == before + 1
+    assert first.get_json()["checkout_url"] == second.get_json()["checkout_url"]
+
+
+@postgres_only
+def test_concurrent_payment_confirmations_reserve_stock_once(app, client, buyer, kiki_seller, fake_stripe, monkeypatch):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    start = item["inventory_count"]
+    order = place_order(buyer, seller_id, item["candy_id"], quantity=2).get_json()
+    session_id = fake_stripe.last_session_id
+
+    # The sweep already released the stock; then the buyer's payment lands.
+    with app.app_context():
+        row = db.session.get(Order, order["id"])
+        row.checkout_started_at = utcnow() - timedelta(hours=2)
+        db.session.commit()
+    client.get("/shops")
+    assert inventory_count(client, seller_id, item["candy_id"]) == start
+    fake_stripe.mark_paid(session_id)
+
+    original = fake_stripe.retrieve_session
+
+    def slow_retrieve(sid, **kwargs):
+        time.sleep(0.5)
+        return original(sid, **kwargs)
+
+    monkeypatch.setattr(payments.stripe.checkout.Session, "retrieve", slow_retrieve)
+    url = f"/orders/{order['id']}/payment/confirm"
+    run_together(lambda: buyer.post(url), lambda: buyer.post(url))
+
+    assert buyer.get(f"/orders/{order['id']}").get_json()["payment_status"] == "paid"
+    assert inventory_count(client, seller_id, item["candy_id"]) == start - 2
 
 
 # --- The abandonment sweep measures from the current session ------------------
@@ -419,15 +516,33 @@ def test_a_partial_refund_keeps_the_order_collectable(webhook_app, fake_stripe):
     _seller, _item, order = paid_order(client, buyer, fake_stripe, quantity=2)
     intent = f"pi_test_{fake_stripe.last_session_id}"
 
+    admin = login(client, "admin@example.com", ADMIN_PASSWORD)
+    before = admin.get("/admin/revenue").get_json()
+
     body, headers = signed_webhook(charge_refunded_event(intent, order["total_cents"], 100))
     client.post("/stripe/webhook", data=body, headers=headers)
-    assert buyer.get(f"/orders/{order['id']}").get_json()["payment_status"] == "paid"
+    partial = buyer.get(f"/orders/{order['id']}").get_json()
+    assert partial["payment_status"] == "paid"
+    assert partial["refunded_cents"] == 100
+    assert partial["seller_payout_cents"] == order["seller_payout_cents"] - 100
+
+    after = admin.get("/admin/revenue").get_json()
+    assert after["paid_order_count"] == before["paid_order_count"]
+    assert after["gross_cents"] == before["gross_cents"] - 100
+    assert after["partially_refunded_cents"] == before["partially_refunded_cents"] + 100
+    assert after["connect_seller_payout_cents"] == before["connect_seller_payout_cents"] - 100
+
+    # A redelivered event does not count the same refund twice.
+    client.post("/stripe/webhook", data=body, headers=headers)
+    assert buyer.get(f"/orders/{order['id']}").get_json()["refunded_cents"] == 100
 
     body, headers = signed_webhook(
         charge_refunded_event(intent, order["total_cents"], order["total_cents"])
     )
     client.post("/stripe/webhook", data=body, headers=headers)
-    assert buyer.get(f"/orders/{order['id']}").get_json()["payment_status"] == "refunded"
+    full = buyer.get(f"/orders/{order['id']}").get_json()
+    assert full["payment_status"] == "refunded"
+    assert full["refunded_cents"] == order["total_cents"]
 
 
 # --- A mistyped password does not sign the person out ---------------------------

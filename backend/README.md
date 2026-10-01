@@ -159,11 +159,18 @@ just before the cancel, the order is marked paid and cancel answers 409.
 locks are not held across the network call. If Stripe then fails, the stock
 goes back on the shelf and the order is marked `expired`.
 
+Every payment-state change locks the order row first (then its inventory
+rows), so a webhook, the buyer's browser and a double click cannot interleave:
+two confirmations never reserve stock twice, and two resumes never open two
+sessions.
+
 Payment state only moves forward. `paid`, `refunded` and `pay_at_pickup` are
 settled: a replayed `checkout.session.completed` or a reloaded return page
 cannot turn a refunded order back into a paid one. Webhooks for a
-`checkout.session` that is not the order's current one (a resumed checkout
-replaces it) are acknowledged and ignored.
+`checkout.session.expired` for a session that is not the order's current one
+(a resumed checkout replaces it) are acknowledged and ignored. A paid
+`checkout.session.completed` counts for any session of the order, since it is
+real money, and that session becomes the current one.
 
 ### Platform fee
 
@@ -177,7 +184,8 @@ order records:
   `"connect"` when Stripe paid the shop; `NULL` / `"manual"` for orders from
   before Connect, where the platform still owes the share by hand
 
-`GET /admin/revenue` totals paid orders, and splits the seller share into
+`GET /admin/revenue` totals paid orders net of partial refunds
+(`gross_cents` already excludes `partially_refunded_cents`), and splits the seller share into
 `connect_seller_payout_cents` (Stripe paid it) and `seller_payout_owed_cents`
 (pre-Connect orders the platform still has to pay).
 
@@ -233,8 +241,11 @@ made in the Stripe Dashboard instead should tick the same two boxes ("Reverse
 transfer", "Refund application fee"); otherwise the platform absorbs it. Either
 way `charge.refunded` still flips the order to `refunded`, but only for a full
 refund (`refunded: true` on the charge). A partial refund made in the Dashboard
-leaves the order `paid` and in the pickup queue. Partial refunds are not
-supported in the API yet.
+leaves the order `paid` and in the pickup queue, and records the amount in
+`order.refunded_cents`, which comes off the order's net total, the seller
+payout and the revenue totals. The platform fee is left as recorded: whether
+Stripe returned part of it depends on the "Refund application fee" box. Partial
+refunds are not supported in the API yet.
 
 ## Storefront identity
 
