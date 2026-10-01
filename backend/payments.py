@@ -284,6 +284,33 @@ def application_fee_refunded_cents(application_fee):
     return None
 
 
+def charge_fee_refunded_cents(charge_id):
+    """Refunded part of a charge's application fee, or None if unknown.
+
+    Best effort, for the admin refund path: the refund itself already went
+    through, so a failure here must not turn it into an error. The
+    charge.refunded webhook records the same figure anyway.
+    """
+    if not charge_id or not stripe_enabled():
+        return None
+    try:
+        charge = to_plain_dict(
+            stripe.Charge.retrieve(
+                charge_id, api_key=secret_key(), expand=["application_fee"]
+            )
+        )
+    except stripe.StripeError as error:
+        logger.info("charge retrieve skipped for %s: %s", charge_id, error)
+        return None
+    fee = charge.get("application_fee")
+    if not isinstance(fee, dict):
+        return None
+    refunded = fee.get("amount_refunded")
+    if isinstance(refunded, int) and not isinstance(refunded, bool):
+        return refunded
+    return None
+
+
 def refund_order(order):
     """Fully refund an order's payment through Stripe.
 

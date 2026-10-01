@@ -212,6 +212,13 @@ Vercel settings were changed. Not deployed.
   on `charge.refunded` (no new webhook subscription needed). Revenue and seller
   payouts use the net fee.
 
+### Fourth Codex review
+- Resume answers 409 while `POST /orders` is still opening the first session,
+  and `POST /orders` withdraws its session if one was attached meanwhile, so
+  one order never has two payable sessions.
+- Admin refund records the application fee Stripe actually returned instead
+  of assuming all of it.
+
 ### Deploy note
 - Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
   new deploy will fail to start (Render keeps the previous deploy serving).

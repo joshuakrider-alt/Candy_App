@@ -158,7 +158,9 @@ just before the cancel, the order is marked paid and cancel answers 409.
 `POST /orders` commits the stock reservation before calling Stripe, so row
 locks are not held across the network call. Once Stripe answers, the order is re-locked and
 re-checked; if it was released meanwhile (the buyer deleted their account),
-the new session is expired and the call answers 409. If Stripe then fails, the stock
+the new session is expired and the call answers 409. Until that
+first session is attached, `POST /orders/<id>/checkout` answers 409 rather
+than opening a second payable session for the same order. If Stripe then fails, the stock
 goes back on the shelf and the order is marked `expired`.
 
 Every payment-state change locks the order row first (then its inventory
@@ -249,7 +251,9 @@ payout and the revenue totals. When the refund also returned part of the
 platform fee ("Refund application fee"), the handler reads the fee's refunded
 amount from Stripe into `order.platform_fee_refunded_cents`, and the platform
 fee and seller payout are both computed from the net fee. An admin refund of a
-Connect order returns the whole fee. Orders refunded before these columns
+Connect order reads the fee Stripe actually returned (less than all of it if an
+earlier partial refund kept the fee); if Stripe cannot say, the webhook records
+it. Orders refunded before these columns
 existed keep `refunded_cents = 0`: the old handler marked partial refunds
 `refunded` too, so the amount is unknown rather than assumed, and a later
 `charge.refunded` for the order records it. Webhook

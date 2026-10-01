@@ -1760,6 +1760,12 @@ def register_routes(app):
             payments.expire_checkout_session(session.get("id"))
             db.session.commit()
             abort(409, description="this order was cancelled while checkout was opening")
+        if order.stripe_checkout_session_id:
+            # Another request attached a session meanwhile. Two live sessions
+            # for one order could both be paid, so this one is withdrawn.
+            payments.expire_checkout_session(session.get("id"))
+            db.session.commit()
+            abort(409, description="checkout for this order was opened elsewhere")
         checkout_url = apply_checkout_session(order, session, destination)
         db.session.commit()
         return jsonify(order_response(order, checkout_url=checkout_url)), 201
@@ -1780,6 +1786,11 @@ def register_routes(app):
             abort(400, description="this order can no longer be paid; place a new one")
         if order.inventory_released_at is not None:
             abort(400, description="this checkout expired; place a new order")
+        if not order.stripe_checkout_session_id:
+            # POST /orders commits the order before Stripe answers, and attaches
+            # its session afterwards. Opening a second one here would leave two
+            # payable sessions for one order.
+            abort(409, description="checkout for this order is still opening; try again in a moment")
 
         if order.stripe_checkout_session_id:
             session = payments.retrieve_checkout_session(order.stripe_checkout_session_id)
@@ -1876,13 +1887,20 @@ def register_routes(app):
         order = lock_order(Order.query.get_or_404(order_id))
         if order.payment_status != "paid":
             abort(400, description="only paid orders can be refunded")
-        payments.refund_order(order)
+        refund = payments.refund_order(order) or {}
         order.payment_status = "refunded"
         order.refunded_cents = order.total_cents
-        # A Connect refund is made with refund_application_fee=true, so the
-        # whole fee goes back to the shop along with the full refund.
+        # A Connect refund sets refund_application_fee=true, but Stripe returns
+        # the fee in proportion to what this refund covers: after an earlier
+        # partial refund that kept the fee, not all of it comes back. So read
+        # the real figure; if that fails, the charge.refunded webhook records it.
         if order.stripe_destination_account_id:
-            order.platform_fee_refunded_cents = order.platform_fee_cents
+            fee_refunded = payments.charge_fee_refunded_cents(refund.get("charge"))
+            if fee_refunded is not None:
+                order.platform_fee_refunded_cents = max(
+                    order.platform_fee_refunded_cents or 0,
+                    min(fee_refunded, order.platform_fee_cents or 0),
+                )
         db.session.commit()
         return jsonify(order_response(order))
 

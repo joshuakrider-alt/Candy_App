@@ -417,6 +417,53 @@ def test_an_order_released_while_stripe_answers_does_not_go_live(
         assert order.stripe_checkout_session_id != session_id
 
 
+def test_resume_waits_for_the_first_checkout_to_finish_opening(
+    app, client, buyer, kiki_seller, fake_stripe, monkeypatch
+):
+    """A resume during POST /orders' Stripe call must not open a second session."""
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    original = fake_stripe.create_session
+    seen = {}
+
+    def resume_meanwhile(**params):
+        if "resume" not in seen:
+            order_id = int(params["client_reference_id"])
+            seen["resume"] = buyer.post(f"/orders/{order_id}/checkout")
+        return original(**params)
+
+    monkeypatch.setattr(payments.stripe.checkout.Session, "create", resume_meanwhile)
+    created = place_order(buyer, seller_id, item["candy_id"])
+    assert seen["resume"].status_code == 409
+    assert created.status_code == 201
+    assert len(fake_stripe.created_sessions) == 1
+
+
+def test_a_session_attached_while_stripe_answers_wins(
+    app, client, buyer, kiki_seller, fake_stripe, monkeypatch
+):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    original = fake_stripe.create_session
+
+    def attached_meanwhile(**params):
+        order_id = int(params["client_reference_id"])
+        Order.query.filter_by(id=order_id).update(
+            {"stripe_checkout_session_id": "cs_test_attached_elsewhere"},
+            synchronize_session=False,
+        )
+        db.session.commit()
+        return original(**params)
+
+    monkeypatch.setattr(payments.stripe.checkout.Session, "create", attached_meanwhile)
+    response = place_order(buyer, seller_id, item["candy_id"])
+    assert response.status_code == 409
+    assert fake_stripe.last_session_id in fake_stripe.expired_sessions
+    with app.app_context():
+        order = Order.query.order_by(Order.id.desc()).first()
+        assert order.stripe_checkout_session_id == "cs_test_attached_elsewhere"
+
+
 # --- Retiring a catalog item ---------------------------------------------------
 
 
@@ -670,16 +717,47 @@ def test_a_refund_that_also_returns_the_fee_is_netted_out_of_both_sides(
     )
 
 
-def test_an_admin_refund_of_a_connect_order_returns_the_whole_fee(
+@pytest.mark.parametrize("fee_returned_share", [1.0, 0.5])
+def test_an_admin_refund_records_the_fee_stripe_actually_returned(
+    webhook_app, fake_stripe, monkeypatch, fee_returned_share
+):
+    """After an earlier partial refund that kept the fee, only part comes back."""
+    client = webhook_app.test_client()
+    buyer = login(client, "alice@example.com", BUYER_PASSWORD)
+    admin = login(client, "admin@example.com", ADMIN_PASSWORD)
+    _seller, _item, order = paid_order(client, buyer, fake_stripe, quantity=2)
+    fee_back = int(order["platform_fee_cents"] * fee_returned_share)
+    refunds = []
+
+    monkeypatch.setattr(
+        payments.stripe.Refund,
+        "create",
+        lambda **params: refunds.append(params) or {"id": "re_test_1", "charge": "ch_test_1"},
+    )
+    monkeypatch.setattr(
+        payments.stripe.Charge,
+        "retrieve",
+        lambda charge_id, **_kwargs: {
+            "id": charge_id,
+            "application_fee": {"id": "fee_test_1", "amount_refunded": fee_back},
+        },
+    )
+    refunded = admin.post(f"/admin/orders/{order['id']}/refund").get_json()
+    assert refunds[-1]["refund_application_fee"] is True
+    assert refunded["payment_status"] == "refunded"
+    assert refunded["platform_fee_refunded_cents"] == fee_back
+
+
+def test_an_admin_refund_leaves_the_fee_to_the_webhook_if_stripe_cannot_say(
     webhook_app, fake_stripe, stub_refunds
 ):
     client = webhook_app.test_client()
     buyer = login(client, "alice@example.com", BUYER_PASSWORD)
     admin = login(client, "admin@example.com", ADMIN_PASSWORD)
     _seller, _item, order = paid_order(client, buyer, fake_stripe)
-    refunded = admin.post(f"/admin/orders/{order['id']}/refund").get_json()
-    assert refunded["platform_fee_refunded_cents"] == order["platform_fee_cents"]
-    assert stub_refunds[-1]["refund_application_fee"] is True
+    refunded = admin.post(f"/admin/orders/{order['id']}/refund")
+    assert refunded.status_code == 200
+    assert refunded.get_json()["platform_fee_refunded_cents"] == 0
 
 
 def test_a_refund_event_records_the_real_amount_on_an_order_already_refunded(
