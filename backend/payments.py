@@ -98,6 +98,17 @@ def platform_fee_for(subtotal_cents):
     return max(0, min(int(fee), int(subtotal_cents)))
 
 
+def require_minimum_charge(total_cents):
+    if total_cents < MINIMUM_CHARGE_CENTS:
+        abort(
+            400,
+            description=(
+                f"Card payments need a total of at least "
+                f"${MINIMUM_CHARGE_CENTS / 100:.2f}. Add another snack."
+            ),
+        )
+
+
 def checkout_return_base(request_origin):
     """Where Stripe sends the buyer back to.
 
@@ -136,14 +147,7 @@ def create_checkout_session(
         # platform-only charge from ever being created by accident.
         abort(409, description="This shop cannot accept card payments yet.")
 
-    if order.total_cents < MINIMUM_CHARGE_CENTS:
-        abort(
-            400,
-            description=(
-                f"Card payments need a total of at least "
-                f"${MINIMUM_CHARGE_CENTS / 100:.2f}. Add another snack."
-            ),
-        )
+    require_minimum_charge(order.total_cents)
 
     line_items = []
     for item in order.items:
@@ -217,6 +221,41 @@ def retrieve_checkout_session(session_id):
     except stripe.StripeError as error:
         logger.error("stripe session retrieve failed for %s: %s", session_id, error)
         abort(502, description="Stripe could not confirm this payment. Try again.")
+
+
+def expire_checkout_session(session_id):
+    """Close an open Checkout Session so it can no longer take a payment.
+
+    Best effort: Stripe refuses to expire a session that is already complete or
+    expired, and neither case should block the cancellation that called this.
+    Returns the session as Stripe reports it afterwards, or None.
+    """
+    if not session_id or not stripe_enabled():
+        return None
+    try:
+        return to_plain_dict(
+            stripe.checkout.Session.expire(session_id, api_key=secret_key())
+        )
+    except stripe.StripeError as error:
+        logger.info("stripe session expire skipped for %s: %s", session_id, error)
+        return None
+
+
+def charge_fully_refunded(charge):
+    """Whether a `charge.refunded` payload describes a full refund.
+
+    Stripe sends `charge.refunded` for partial refunds too. A partially
+    refunded order still has goods to collect, so only a full refund changes it.
+    """
+    if not isinstance(charge, dict):
+        return False
+    if charge.get("refunded") is True:
+        return True
+    amount = charge.get("amount")
+    refunded = charge.get("amount_refunded")
+    if isinstance(amount, int) and isinstance(refunded, int) and amount > 0:
+        return refunded >= amount
+    return False
 
 
 def refund_order(order):

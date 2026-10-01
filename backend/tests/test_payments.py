@@ -326,6 +326,9 @@ def test_webhook_matches_a_refund_by_payment_intent(make_app, fake_stripe):
                 "object": {
                     "id": "ch_test_1",
                     "object": "charge",
+                    "amount": order["total_cents"],
+                    "amount_refunded": order["total_cents"],
+                    "refunded": True,
                     "payment_intent": f"pi_test_{session_id}",
                 }
             },

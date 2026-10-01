@@ -72,6 +72,9 @@ NEW_COLUMNS = (
     ("seller", "stripe_details_submitted", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("seller", "stripe_connect_updated_at", "TIMESTAMP"),
     ("order", "stripe_destination_account_id", "VARCHAR(255)"),
+    # NULL for orders from before this column; the sweep falls back to
+    # created_at for those.
+    ("order", "checkout_started_at", "TIMESTAMP"),
 )
 
 

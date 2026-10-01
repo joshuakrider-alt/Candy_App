@@ -115,7 +115,7 @@ def test_change_own_password_requires_the_current_one(client, buyer):
         "/me/password",
         json={"current_password": "not-it-at-all", "new_password": "new-password-9"},
     )
-    assert wrong.status_code == 401
+    assert wrong.status_code == 403
 
     ok = buyer.put(
         "/me/password",

@@ -471,6 +471,10 @@ class Order(db.Model):
     stripe_destination_account_id = db.Column(db.String(255))
     paid_at = db.Column(db.DateTime)
     inventory_released_at = db.Column(db.DateTime)
+    # When the current Checkout Session was opened. Resuming a checkout opens a
+    # new session, so the abandonment sweep measures from here rather than from
+    # created_at; otherwise it could expire an order mid-payment.
+    checkout_started_at = db.Column(db.DateTime)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")

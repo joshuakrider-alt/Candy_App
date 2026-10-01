@@ -161,6 +161,39 @@ Get production API out of Stripe test mode so real-card checkout works.
 - Black password fields: confirm after deploy on the browser/OS that showed it.
 - Not deployed; merge is Joshua's call.
 
+## 2026-10-01 — Order lifecycle logic review fixes (Claude Code)
+
+Branch `claude/determined-bell-8tntzt`. Backend only; no env, Stripe, Render or
+Vercel settings were changed. Not deployed.
+
+### Fixed
+- Refunded orders could be flipped back to `paid` by a reloaded return page or
+  a replayed `checkout.session.completed`, re-showing the pickup code and
+  putting the order back in the seller queue. Payment state now only moves
+  forward from `unpaid`/`pending`/`expired`.
+- Webhooks for a replaced Checkout Session (after a resume) could expire the
+  live checkout and release its stock. They are now ignored.
+- The abandonment sweep measured from `created_at`, so it could expire a
+  resumed checkout mid-payment. New `order.checkout_started_at` column (added
+  by the boot migration) is used instead.
+- Cancel and account deletion now expire the Stripe session.
+- `DELETE /candies/<id>` hard-deleted rows that order lines reference, a 500
+  on Postgres. It now retires the item.
+- Non-numeric or fractional quantity / count / price input returned 500 or was
+  truncated; now a 400. Admin prices can no longer be negative.
+- A count-only inventory update left the stock label stale; status now follows
+  the count.
+- Partial-refund `charge.refunded` events no longer mark the whole order refunded.
+- Wrong current password on `PUT /me/password` and `DELETE /me` is now 403
+  (was 401, which the frontend treats as sign-out).
+- `POST /orders` no longer holds row locks across the Stripe call.
+- The API refuses to boot against a non-SQLite database with the default
+  `JWT_SECRET_KEY`.
+
+### Deploy note
+- Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
+  new deploy will fail to start (Render keeps the previous deploy serving).
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
