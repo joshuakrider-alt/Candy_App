@@ -23,7 +23,7 @@ The API listens on `http://127.0.0.1:5000`. A frontend served from
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | production | SQLite file | Neon Postgres connection string |
-| `JWT_SECRET_KEY` | production | dev placeholder | Rotating it signs everyone out |
+| `JWT_SECRET_KEY` | production | dev placeholder | Rotating it signs everyone out. The API refuses to start against a non-SQLite database while it is unset |
 | `CORS_ORIGINS` | production | `*` | Comma separated; also the allowlist for Stripe return URLs |
 | `PUBLIC_SITE_URL` | no | `https://www.neighborhoodcandylady.com` | Fallback base for Stripe return URLs |
 | `STRIPE_SECRET_KEY` | for payments | empty | `sk_test_...` in test mode. Never commit it |
@@ -69,7 +69,9 @@ has to be a real deletion, not a deactivation.
 Authentication is the same as every other `/me` route: a valid JWT and nothing
 else. A client that wants a confirmation step may also send
 `{"password": "..."}`; if that field is present it has to be correct, otherwise
-the call returns 401 and nothing is deleted. Success returns `204 No Content`.
+the call returns 403 and nothing is deleted (403 rather than 401, so a client
+that treats 401 as "session expired" does not sign the person out over a typo;
+`PUT /me/password` does the same). Success returns `204 No Content`.
 
 What happens:
 
@@ -144,9 +146,35 @@ naming the variable. No stock is reserved in that case.
 Abandoned checkouts: the Checkout Session expires after
 `CHECKOUT_SESSION_TTL_MINUTES`, and orders still `pending` after
 `PENDING_ORDER_TTL_MINUTES` are marked `expired` with their stock returned to
-the shelf. That sweep runs when shops or storefronts are read and when an order
-is created. `checkout.session.expired` and `POST /orders/<id>/cancel` do the
-same thing immediately.
+the shelf. The clock starts when the order's *current* Checkout Session opened
+(`checkout_started_at`), so resuming a checkout gives it a fresh window, and the
+sweep never fires sooner than the session lifetime plus five minutes. That sweep
+runs when shops or storefronts are read and when an order is created.
+`checkout.session.expired` and `POST /orders/<id>/cancel` do the same thing
+immediately; cancel (and account deletion) also expire the Stripe session so a
+tab left open cannot pay for released stock. If Stripe reports the buyer paid
+just before the cancel, the order is marked paid and cancel answers 409.
+
+`POST /orders` commits the stock reservation before calling Stripe, so row
+locks are not held across the network call. Once Stripe answers, the order is re-locked and
+re-checked; if it was released meanwhile (the buyer deleted their account),
+the new session is expired and the call answers 409. Until that
+first session is attached, `POST /orders/<id>/checkout` answers 409 rather
+than opening a second payable session for the same order. If Stripe then fails, the stock
+goes back on the shelf and the order is marked `expired`.
+
+Every payment-state change locks the order row first (then its inventory
+rows), so a webhook, the buyer's browser and a double click cannot interleave:
+two confirmations never reserve stock twice, and two resumes never open two
+sessions.
+
+Payment state only moves forward. `paid`, `refunded` and `pay_at_pickup` are
+settled: a replayed `checkout.session.completed` or a reloaded return page
+cannot turn a refunded order back into a paid one. Webhooks for a
+`checkout.session.expired` for a session that is not the order's current one
+(a resumed checkout replaces it) are acknowledged and ignored. A paid
+`checkout.session.completed` counts for any session of the order, since it is
+real money, and that session becomes the current one.
 
 ### Platform fee
 
@@ -160,7 +188,8 @@ order records:
   `"connect"` when Stripe paid the shop; `NULL` / `"manual"` for orders from
   before Connect, where the platform still owes the share by hand
 
-`GET /admin/revenue` totals paid orders, and splits the seller share into
+`GET /admin/revenue` totals paid orders net of partial refunds
+(`gross_cents` already excludes `partially_refunded_cents`), and splits the seller share into
 `connect_seller_payout_cents` (Stripe paid it) and `seller_payout_owed_cents`
 (pre-Connect orders the platform still has to pay).
 
@@ -214,8 +243,26 @@ Stripe and marks it `refunded`. For a Connect order it sets
 back out of the shop's balance and the platform's fee is returned too. A refund
 made in the Stripe Dashboard instead should tick the same two boxes ("Reverse
 transfer", "Refund application fee"); otherwise the platform absorbs it. Either
-way `charge.refunded` still flips the order to `refunded`. Partial refunds are
-not supported in the API yet.
+way `charge.refunded` still flips the order to `refunded`, but only for a full
+refund (`refunded: true` on the charge). A partial refund made in the Dashboard
+leaves the order `paid` and in the pickup queue, and records the amount in
+`order.refunded_cents`, which comes off the order's net total, the seller
+payout and the revenue totals. When the refund also returned part of the
+platform fee ("Refund application fee"), the handler reads the fee's refunded
+amount from Stripe into `order.platform_fee_refunded_cents`, and the platform
+fee and seller payout are both computed from the net fee. An admin refund of a
+Connect order reads the fee Stripe actually returned (less than all of it if an
+earlier partial refund kept the fee); if Stripe cannot say, the webhook records
+it. Orders refunded before these columns
+existed keep `refunded_cents = 0`: the old handler marked partial refunds
+`refunded` too, so the amount is unknown rather than assumed, and a later
+`charge.refunded` for the order records it. Webhook
+delivery order is not guaranteed, so a refund is recorded even if it arrives
+before the payment it reverses; the later completion then marks the order
+`refunded` and releases its stock. A `charge.refunded` that matches no order
+yet answers 409 so Stripe redelivers it once the payment is recorded. Seller
+payout totals clamp each order at zero, so a heavily refunded order never
+reduces other orders' share. Partial refunds are not supported in the API yet.
 
 ## Storefront identity
 
@@ -293,7 +340,7 @@ Admin only:
 
 - `GET /applications`, `PUT /applications/<seller_id>`
 - `GET /users`, `POST /users`, `GET /users/<id>`, `PUT /users/<id>/password`
-- `POST /candies`, `PUT /candies/<id>`, `DELETE /candies/<id>`
+- `POST /candies`, `PUT /candies/<id>`, `DELETE /candies/<id>` (retires the item: `is_active=false` and every shop's stock zeroed; past orders keep naming it)
 - `GET /orders`, `GET /admin/revenue`
 - `POST /admin/orders/<id>/refund`
 

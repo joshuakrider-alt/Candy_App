@@ -98,6 +98,17 @@ def platform_fee_for(subtotal_cents):
     return max(0, min(int(fee), int(subtotal_cents)))
 
 
+def require_minimum_charge(total_cents):
+    if total_cents < MINIMUM_CHARGE_CENTS:
+        abort(
+            400,
+            description=(
+                f"Card payments need a total of at least "
+                f"${MINIMUM_CHARGE_CENTS / 100:.2f}. Add another snack."
+            ),
+        )
+
+
 def checkout_return_base(request_origin):
     """Where Stripe sends the buyer back to.
 
@@ -136,14 +147,7 @@ def create_checkout_session(
         # platform-only charge from ever being created by accident.
         abort(409, description="This shop cannot accept card payments yet.")
 
-    if order.total_cents < MINIMUM_CHARGE_CENTS:
-        abort(
-            400,
-            description=(
-                f"Card payments need a total of at least "
-                f"${MINIMUM_CHARGE_CENTS / 100:.2f}. Add another snack."
-            ),
-        )
+    require_minimum_charge(order.total_cents)
 
     line_items = []
     for item in order.items:
@@ -217,6 +221,94 @@ def retrieve_checkout_session(session_id):
     except stripe.StripeError as error:
         logger.error("stripe session retrieve failed for %s: %s", session_id, error)
         abort(502, description="Stripe could not confirm this payment. Try again.")
+
+
+def expire_checkout_session(session_id):
+    """Close an open Checkout Session so it can no longer take a payment.
+
+    Best effort: Stripe refuses to expire a session that is already complete or
+    expired, and neither case should block the cancellation that called this.
+    Returns the session as Stripe reports it afterwards, or None.
+    """
+    if not session_id or not stripe_enabled():
+        return None
+    try:
+        return to_plain_dict(
+            stripe.checkout.Session.expire(session_id, api_key=secret_key())
+        )
+    except stripe.StripeError as error:
+        logger.info("stripe session expire skipped for %s: %s", session_id, error)
+        return None
+
+
+def charge_fully_refunded(charge):
+    """Whether a `charge.refunded` payload describes a full refund.
+
+    Stripe sends `charge.refunded` for partial refunds too. A partially
+    refunded order still has goods to collect, so only a full refund changes it.
+    """
+    if not isinstance(charge, dict):
+        return False
+    if charge.get("refunded") is True:
+        return True
+    amount = charge.get("amount")
+    refunded = charge.get("amount_refunded")
+    if isinstance(amount, int) and isinstance(refunded, int) and amount > 0:
+        return refunded >= amount
+    return False
+
+
+def application_fee_refunded_cents(application_fee):
+    """How much of an application fee Stripe has refunded, in cents.
+
+    A charge carries its fee as an id, or as the object when expanded. The
+    fee refund is created together with the charge refund, so reading it when
+    charge.refunded arrives sees the refund that event reports.
+    """
+    if isinstance(application_fee, dict):
+        fee = application_fee
+    elif application_fee:
+        try:
+            fee = to_plain_dict(
+                stripe.ApplicationFee.retrieve(application_fee, api_key=require_stripe())
+            )
+        except stripe.StripeError as error:
+            logger.error("application fee retrieve failed for %s: %s", application_fee, error)
+            # A non-2xx makes Stripe redeliver the webhook later.
+            abort(502, description="Stripe could not report the application fee. Try again.")
+    else:
+        return None
+    refunded = fee.get("amount_refunded")
+    if isinstance(refunded, int) and not isinstance(refunded, bool):
+        return refunded
+    return None
+
+
+def charge_fee_refunded_cents(charge_id):
+    """Refunded part of a charge's application fee, or None if unknown.
+
+    Best effort, for the admin refund path: the refund itself already went
+    through, so a failure here must not turn it into an error. The
+    charge.refunded webhook records the same figure anyway.
+    """
+    if not charge_id or not stripe_enabled():
+        return None
+    try:
+        charge = to_plain_dict(
+            stripe.Charge.retrieve(
+                charge_id, api_key=secret_key(), expand=["application_fee"]
+            )
+        )
+    except stripe.StripeError as error:
+        logger.info("charge retrieve skipped for %s: %s", charge_id, error)
+        return None
+    fee = charge.get("application_fee")
+    if not isinstance(fee, dict):
+        return None
+    refunded = fee.get("amount_refunded")
+    if isinstance(refunded, int) and not isinstance(refunded, bool):
+        return refunded
+    return None
 
 
 def refund_order(order):

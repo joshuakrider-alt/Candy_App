@@ -161,6 +161,68 @@ Get production API out of Stripe test mode so real-card checkout works.
 - Black password fields: confirm after deploy on the browser/OS that showed it.
 - Not deployed; merge is Joshua's call.
 
+## 2026-10-01 — Order lifecycle logic review fixes (Claude Code)
+
+Branch `claude/determined-bell-8tntzt`. Backend only; no env, Stripe, Render or
+Vercel settings were changed. Not deployed.
+
+### Fixed
+- Refunded orders could be flipped back to `paid` by a reloaded return page or
+  a replayed `checkout.session.completed`, re-showing the pickup code and
+  putting the order back in the seller queue. Payment state now only moves
+  forward from `unpaid`/`pending`/`expired`.
+- Webhooks for a replaced Checkout Session (after a resume) could expire the
+  live checkout and release its stock. They are now ignored.
+- The abandonment sweep measured from `created_at`, so it could expire a
+  resumed checkout mid-payment. New `order.checkout_started_at` column (added
+  by the boot migration) is used instead.
+- Cancel and account deletion now expire the Stripe session.
+- `DELETE /candies/<id>` hard-deleted rows that order lines reference, a 500
+  on Postgres. It now retires the item.
+- Non-numeric or fractional quantity / count / price input returned 500 or was
+  truncated; now a 400. Admin prices can no longer be negative.
+- A count-only inventory update left the stock label stale; status now follows
+  the count.
+- Partial-refund `charge.refunded` events no longer mark the whole order refunded.
+- Wrong current password on `PUT /me/password` and `DELETE /me` is now 403
+  (was 401, which the frontend treats as sign-out).
+- `POST /orders` no longer holds row locks across the Stripe call.
+- The API refuses to boot against a non-SQLite database with the default
+  `JWT_SECRET_KEY`.
+
+### Review follow-up (Codex review on PR #19)
+- Payment-state changes lock the order row first, so concurrent confirms
+  cannot reserve stock twice and concurrent resumes open one session.
+- A paid completion is accepted for any of the order's sessions.
+- New `order.refunded_cents` column records partial refunds; revenue and
+  seller payouts are net of them.
+
+### Second Codex review
+- A refund delivered before its payment completion is recorded and honoured;
+  an unmatched `charge.refunded` answers 409 so Stripe redelivers it.
+- `POST /orders` re-checks the order after the Stripe call and expires the new
+  session if the order was released meanwhile.
+- Seller payout totals clamp each order at zero before summing.
+
+### Third Codex review
+- No backfill of `refunded_cents` for orders already `refunded`: the old
+  handler marked partial refunds that way too, so the amount stays unknown (0)
+  until a `charge.refunded` for the order records it.
+- New `order.platform_fee_refunded_cents`, read from Stripe's application fee
+  on `charge.refunded` (no new webhook subscription needed). Revenue and seller
+  payouts use the net fee.
+
+### Fourth Codex review
+- Resume answers 409 while `POST /orders` is still opening the first session,
+  and `POST /orders` withdraws its session if one was attached meanwhile, so
+  one order never has two payable sessions.
+- Admin refund records the application fee Stripe actually returned instead
+  of assuming all of it.
+
+### Deploy note
+- Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
+  new deploy will fail to start (Render keeps the previous deploy serving).
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

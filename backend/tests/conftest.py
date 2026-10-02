@@ -30,6 +30,7 @@ class FakeStripe:
         self.created_sessions = []
         self.session_state = {}
         self.next_session_id = 1
+        self.expired_sessions = []
 
     def create_session(self, **params):
         session_id = f"cs_test_{self.next_session_id}"
@@ -55,6 +56,17 @@ class FakeStripe:
             payment_intent=f"pi_test_{session_id}",
         )
 
+    def expire_session(self, session_id, **_kwargs):
+        """Mirror Stripe: only an open session can be expired."""
+        session = self.session_state[session_id]
+        if session["status"] != "open":
+            raise payments.stripe.InvalidRequestError(
+                f"session {session_id} is {session['status']}", param=None
+            )
+        session["status"] = "expired"
+        self.expired_sessions.append(session_id)
+        return session
+
     def mark_expired(self, session_id):
         self.session_state[session_id].update(status="expired", payment_status="unpaid")
 
@@ -75,6 +87,11 @@ def fake_stripe(monkeypatch):
         payments.stripe.checkout.Session,
         "retrieve",
         lambda session_id, **kwargs: fake.retrieve_session(session_id, **kwargs),
+    )
+    monkeypatch.setattr(
+        payments.stripe.checkout.Session,
+        "expire",
+        lambda session_id, **kwargs: fake.expire_session(session_id, **kwargs),
     )
     return fake
 

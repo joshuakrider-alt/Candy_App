@@ -471,6 +471,18 @@ class Order(db.Model):
     stripe_destination_account_id = db.Column(db.String(255))
     paid_at = db.Column(db.DateTime)
     inventory_released_at = db.Column(db.DateTime)
+    # When the current Checkout Session was opened. Resuming a checkout opens a
+    # new session, so the abandonment sweep measures from here rather than from
+    # created_at; otherwise it could expire an order mid-payment.
+    checkout_started_at = db.Column(db.DateTime)
+    # How much of the payment Stripe has returned to the buyer. A partial
+    # refund leaves the order "paid" (there is still something to hand over),
+    # so reporting needs the amount, not just the status.
+    refunded_cents = db.Column(db.Integer, nullable=False, default=0)
+    # How much of platform_fee_cents Stripe gave back to the shop. A refund
+    # with "Refund application fee" returns the fee in proportion, so the
+    # platform's take and the seller's share both move.
+    platform_fee_refunded_cents = db.Column(db.Integer, nullable=False, default=0)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")
@@ -482,8 +494,17 @@ class Order(db.Model):
     )
 
     @property
+    def net_total_cents(self):
+        """What the buyer paid and kept paid: total minus refunds."""
+        return max(0, (self.total_cents or 0) - (self.refunded_cents or 0))
+
+    @property
+    def net_platform_fee_cents(self):
+        return max(0, (self.platform_fee_cents or 0) - (self.platform_fee_refunded_cents or 0))
+
+    @property
     def seller_payout_cents(self):
-        return max(0, (self.total_cents or 0) - (self.platform_fee_cents or 0))
+        return max(0, self.net_total_cents - self.net_platform_fee_cents)
 
     @property
     def payout_method(self):
@@ -501,6 +522,8 @@ class Order(db.Model):
             "seller_id": self.seller_id,
             "status": self.status,
             "total_cents": self.total_cents,
+            "refunded_cents": self.refunded_cents or 0,
+            "platform_fee_refunded_cents": self.platform_fee_refunded_cents or 0,
             "payment_status": self.payment_status,
             "platform_fee_cents": self.platform_fee_cents,
             "seller_payout_cents": self.seller_payout_cents,

@@ -2041,6 +2041,9 @@ if (adminApp) {
     revenueStack.innerHTML = `
       <div><span>Paid orders</span><strong>${revenue.paid_order_count}</strong></div>
       <div><span>Collected</span><strong>${formatCents(revenue.gross_cents)}</strong></div>
+      <div><span>Partially refunded</span><strong>${formatCents(
+        revenue.partially_refunded_cents || 0
+      )}</strong></div>
       <div><span>Platform fee earned</span><strong>${formatCents(
         revenue.platform_fee_cents
       )}</strong></div>

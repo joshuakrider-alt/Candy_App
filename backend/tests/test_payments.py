@@ -326,6 +326,9 @@ def test_webhook_matches_a_refund_by_payment_intent(make_app, fake_stripe):
                 "object": {
                     "id": "ch_test_1",
                     "object": "charge",
+                    "amount": order["total_cents"],
+                    "amount_refunded": order["total_cents"],
+                    "refunded": True,
                     "payment_intent": f"pi_test_{session_id}",
                 }
             },
@@ -428,6 +431,7 @@ def test_admin_revenue_counts_only_paid_orders(client, buyer, admin, kiki_seller
     assert empty == {
         "paid_order_count": 0,
         "gross_cents": 0,
+        "partially_refunded_cents": 0,
         "platform_fee_cents": 0,
         "seller_payout_cents": 0,
         "connect_order_count": 0,

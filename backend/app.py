@@ -5,7 +5,7 @@ from datetime import timedelta
 from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import HTTPException
 
@@ -48,6 +48,46 @@ logger = logging.getLogger(__name__)
 
 SELLER_STATUSES = ("pending", "approved", "rejected")
 DEFAULT_PUBLIC_SITE_URL = "https://www.neighborhoodcandylady.com"
+
+# Only good enough for a laptop. Anyone who knows it can mint an admin token,
+# so create_app refuses to start against a real database while it is in use.
+DEFAULT_JWT_SECRET = "dev-candy-jwt-secret-change-me-please"
+
+# Payment states an order may still move to "paid" from. "expired" is included
+# because a buyer can finish paying just as the sweep or a cancel releases the
+# stock; the money is real, so the order follows it. "refunded" is final.
+PAYABLE_PAYMENT_STATUSES = ("unpaid", "pending", "expired")
+
+# Payment states where a checkout is still in flight and holds stock.
+OPEN_PAYMENT_STATUSES = ("unpaid", "pending")
+
+
+def parse_int(value, field, minimum=0):
+    """A whole number from JSON, or a 400 naming the field.
+
+    Rejects booleans (True is an int in Python), fractional floats that int()
+    would silently truncate, and anything that is not a number at all.
+    """
+    problem = f"{field} must be a whole number of at least {minimum}"
+    if isinstance(value, bool):
+        abort(400, description=problem)
+    if isinstance(value, float):
+        if not value.is_integer():
+            abort(400, description=problem)
+        value = int(value)
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        abort(400, description=problem)
+    if number < minimum:
+        abort(400, description=problem)
+    return number
+
+
+def stock_status_for(count):
+    if count <= 0:
+        return "out-of-stock"
+    return "low-stock" if count <= 4 else "in-stock"
 
 
 def _env_float(name, default):
@@ -111,10 +151,7 @@ def create_app(config_overrides=None):
         "pool_pre_ping": True,
         "pool_recycle": 280,
     }
-    app.config["JWT_SECRET_KEY"] = os.environ.get(
-        "JWT_SECRET_KEY",
-        "dev-candy-jwt-secret-change-me-please",
-    )
+    app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY") or DEFAULT_JWT_SECRET
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
         hours=_env_int("JWT_ACCESS_TOKEN_HOURS", 12)
     )
@@ -168,6 +205,18 @@ def create_app(config_overrides=None):
 
     if config_overrides:
         app.config.update(config_overrides)
+
+    if (
+        app.config["JWT_SECRET_KEY"] == DEFAULT_JWT_SECRET
+        and not app.config.get("TESTING")
+        and not str(app.config["SQLALCHEMY_DATABASE_URI"]).startswith("sqlite")
+    ):
+        # A failed boot keeps the previous deploy serving on Render; a boot
+        # with a public signing key would let anyone forge an admin login.
+        raise RuntimeError(
+            "JWT_SECRET_KEY is not set. Set it to a long random value in the "
+            "API environment before starting against a real database."
+        )
 
     db.init_app(app)
     jwt = JWTManager(app)
@@ -258,35 +307,82 @@ def register_routes(app):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def lock_order(order):
+        """Re-read an order under a row lock before changing its payment state.
+
+        A webhook, the buyer's browser and a second click can all act on the
+        same order at once. Without the lock each reads the old state and acts
+        on it, e.g. two "paid" handlers both re-reserving released stock. Lock
+        order is always the order row first, then its inventory rows, so these
+        paths cannot deadlock against each other. SQLite renders no FOR UPDATE;
+        its single writer serializes the same paths instead.
+        """
+        return (
+            Order.query.filter_by(id=order.id)
+            .with_for_update()
+            .populate_existing()
+            .one()
+        )
+
+    def locked_inventory_for(order):
+        """The order's shelf rows, write-locked in a deadlock-safe order."""
+        candy_ids = {item.candy_id for item in order.items}
+        if not candy_ids:
+            return {}
+        return {
+            row.candy_id: row
+            for row in seller_inventory_lock_query(order.seller_id, candy_ids).all()
+        }
+
     def release_order_inventory(order):
         """Put an unpaid order's reserved units back on the shelf."""
+        rows = locked_inventory_for(order)
         for item in order.items:
-            inventory = SellerInventory.query.filter_by(
-                seller_id=order.seller_id, candy_id=item.candy_id
-            ).first()
+            inventory = rows.get(item.candy_id)
             if inventory:
                 inventory.apply_count_change(item.quantity)
         order.inventory_released_at = utcnow()
 
     def reserve_order_inventory(order):
+        rows = locked_inventory_for(order)
         for item in order.items:
-            inventory = SellerInventory.query.filter_by(
-                seller_id=order.seller_id, candy_id=item.candy_id
-            ).first()
+            inventory = rows.get(item.candy_id)
             if inventory:
                 inventory.apply_count_change(-item.quantity)
         order.inventory_released_at = None
 
+    def pending_order_ttl_minutes():
+        """How long a checkout may hold stock before the sweep releases it.
+
+        Never shorter than the Stripe session itself plus a margin, so the
+        sweep cannot release stock for a session a buyer could still pay.
+        """
+        return max(
+            app.config["PENDING_ORDER_TTL_MINUTES"],
+            max(
+                payments.MINIMUM_SESSION_TTL_MINUTES,
+                app.config["CHECKOUT_SESSION_TTL_MINUTES"],
+            )
+            + 5,
+        )
+
     def release_stale_pending_orders():
-        """Expire abandoned checkouts so their stock is sellable again."""
-        cutoff = utcnow() - timedelta(minutes=app.config["PENDING_ORDER_TTL_MINUTES"])
+        """Expire abandoned checkouts so their stock is sellable again.
+
+        Measured from when the current Checkout Session opened, not from when
+        the order was created: a resumed checkout gets a fresh session and a
+        fresh window.
+        """
+        cutoff = utcnow() - timedelta(minutes=pending_order_ttl_minutes())
         stale = (
             Order.query.filter(
                 Order.payment_status == "pending",
-                Order.created_at < cutoff,
+                func.coalesce(Order.checkout_started_at, Order.created_at) < cutoff,
                 Order.inventory_released_at.is_(None),
             )
             .limit(50)
+            # Skip orders a payment or cancel is working on right now.
+            .with_for_update(skip_locked=True)
             .all()
         )
         if not stale:
@@ -346,8 +442,24 @@ def register_routes(app):
         return seller.slug
 
     def mark_order_paid(order, session):
-        if order.payment_status == "paid":
+        """Record a payment Stripe has confirmed. Returns True if it changed.
+
+        Refuses anything but a forward move: an already paid order stays as
+        it is, and a refunded one is never revived by a replayed webhook or a
+        reloaded return page, since its Checkout Session still says "paid".
+
+        Any session of this order counts, not only the current one: money that
+        Stripe actually collected for the order is a payment, even on a session
+        that a later resume replaced. That session becomes the current one, so
+        the confirm path and later events look at the session that was paid.
+        """
+        order = lock_order(order)
+        if order.payment_status not in PAYABLE_PAYMENT_STATUSES:
+            db.session.commit()  # release the lock
             return False
+        session_id = (session or {}).get("id")
+        if session_id:
+            order.stripe_checkout_session_id = session_id
         order.payment_status = "paid"
         order.paid_at = utcnow()
         payment_intent = session.get("payment_intent") if session else None
@@ -355,6 +467,15 @@ def register_routes(app):
             payment_intent = payment_intent.get("id")
         if payment_intent:
             order.stripe_payment_intent_id = payment_intent
+        # Stripe does not promise delivery order: a full refund can arrive
+        # before the completion it reverses. Then the money is already back
+        # with the buyer, so the order is refunded, not collectable.
+        if order.total_cents and (order.refunded_cents or 0) >= order.total_cents:
+            if order.inventory_released_at is None:
+                release_order_inventory(order)
+            order.payment_status = "refunded"
+            db.session.commit()
+            return True
         # The buyer paid, so the units belong to this order even if a sweep
         # already returned them to the shelf.
         if order.inventory_released_at is not None:
@@ -387,7 +508,12 @@ def register_routes(app):
             )
         return seller.stripe_account_id
 
-    def start_checkout(order, user, return_to=None):
+    def open_checkout_session(order, user, return_to=None):
+        """Ask Stripe for a Checkout Session. Changes nothing on the order.
+
+        Kept apart from apply_checkout_session so a caller that does not hold
+        the order lock during the Stripe call can re-check the order first.
+        """
         # Decided per session, not per order: the destination is whatever the
         # shop's account is when the buyer actually pays.
         destination = require_connect_ready(order.seller)
@@ -398,10 +524,19 @@ def register_routes(app):
             destination_account_id=destination,
             return_to=return_to,
         )
+        return session, destination
+
+    def apply_checkout_session(order, session, destination):
         order.stripe_destination_account_id = destination
         order.stripe_checkout_session_id = session["id"]
         order.payment_status = "pending"
+        order.checkout_started_at = utcnow()
         return session["url"]
+
+    def start_checkout(order, user, return_to=None):
+        """Open and record a session. Only for a caller holding the order lock."""
+        session, destination = open_checkout_session(order, user, return_to)
+        return apply_checkout_session(order, session, destination)
 
     # ------------------------------------------------------------------
     # Public config and health
@@ -483,8 +618,10 @@ def register_routes(app):
         user = current_user()
         data = request.get_json() or {}
         new_password = validate_password(data.get("new_password"))
+        # 403, not 401: the frontend treats 401 as an expired session and
+        # signs the person out, which is wrong for a mistyped password.
         if not user.check_password(data.get("current_password") or ""):
-            abort(401, description="current password is incorrect")
+            abort(403, description="current password is incorrect")
         user.set_password(new_password)
         db.session.commit()
         return jsonify(user.to_dict())
@@ -504,10 +641,12 @@ def register_routes(app):
         data = request.get_json(silent=True) or {}
         password = data.get("password")
         if password and not user.check_password(password):
-            abort(401, description="current password is incorrect")
+            abort(403, description="current password is incorrect")
 
-        # Hand back the stock held by checkouts the buyer will never finish.
+        # Hand back the stock held by checkouts the buyer will never finish,
+        # and close their Stripe pages so nobody can pay for them afterwards.
         for order in accounts.orders_to_release(user):
+            payments.expire_checkout_session(order.stripe_checkout_session_id)
             release_order_inventory(order)
             order.payment_status = "expired"
 
@@ -550,10 +689,13 @@ def register_routes(app):
         if "name" not in data or "price_cents" not in data:
             abort(400, description="name and price_cents are required")
 
+        name = str(data.get("name") or "").strip()
+        if not name:
+            abort(400, description="name is required")
         candy = Candy(
-            name=data["name"],
+            name=name,
             description=data.get("description", ""),
-            price_cents=int(data["price_cents"]),
+            price_cents=parse_int(data["price_cents"], "price_cents"),
         )
         db.session.add(candy)
         db.session.commit()
@@ -566,9 +708,14 @@ def register_routes(app):
         if candy.owner_seller_id is not None:
             abort(400, description="seller-owned items must be managed through the seller item API")
         data = request.get_json() or {}
-        candy.name = data.get("name", candy.name)
+        if "name" in data:
+            name = str(data.get("name") or "").strip()
+            if not name:
+                abort(400, description="name cannot be empty")
+            candy.name = name
         candy.description = data.get("description", candy.description)
-        candy.price_cents = int(data.get("price_cents", candy.price_cents))
+        if "price_cents" in data:
+            candy.price_cents = parse_int(data["price_cents"], "price_cents")
         db.session.commit()
         return jsonify(candy.to_dict())
 
@@ -578,7 +725,14 @@ def register_routes(app):
         candy = Candy.query.get_or_404(candy_id)
         if candy.owner_seller_id is not None:
             abort(400, description="seller-owned items must be managed through the seller item API")
-        db.session.delete(candy)
+        # Retire rather than delete. Past order lines and photos reference the
+        # row, so a hard delete fails on Postgres's foreign keys, and order
+        # history has to keep naming what was bought.
+        candy.is_active = False
+        SellerInventory.query.filter_by(candy_id=candy.id).update(
+            {"inventory_count": 0, "status": "out-of-stock"},
+            synchronize_session=False,
+        )
         db.session.commit()
         return "", 204
 
@@ -1425,18 +1579,29 @@ def register_routes(app):
             inventory = SellerInventory(seller_id=seller_id, candy_id=candy_id)
             db.session.add(inventory)
 
+        count = None
         if "inventory_count" in data:
-            inventory_count = int(data["inventory_count"])
-            if inventory_count < 0:
-                abort(400, description="inventory_count cannot be negative")
-            inventory.inventory_count = inventory_count
-
+            count = parse_int(data["inventory_count"], "inventory_count")
+        status = None
         if "status" in data:
-            if data["status"] not in INVENTORY_STATUSES:
+            status = data["status"]
+            if status not in INVENTORY_STATUSES:
                 abort(400, description="invalid inventory status")
-            inventory.status = data["status"]
-            if inventory.status == "out-of-stock":
-                inventory.inventory_count = 0
+
+        if count is not None:
+            inventory.inventory_count = count
+        if status is not None:
+            inventory.status = status
+        elif count is not None:
+            # A count on its own sets the label too, so restocking an item
+            # that was marked out actually puts it back in front of buyers.
+            inventory.status = stock_status_for(count)
+        if inventory.status == "out-of-stock":
+            inventory.inventory_count = 0
+        elif not inventory.inventory_count:
+            # Nothing on the shelf cannot be "in stock".
+            inventory.inventory_count = 0
+            inventory.status = "out-of-stock"
 
         db.session.commit()
         return jsonify(inventory.to_dict())
@@ -1516,9 +1681,7 @@ def register_routes(app):
                 candy_id = int(candy_id)
             except (TypeError, ValueError):
                 abort(400, description="each order item requires candy_id")
-            quantity = int(item.get("quantity", 1))
-            if quantity <= 0:
-                abort(400, description="quantity must be positive")
+            quantity = parse_int(item.get("quantity", 1), "quantity", minimum=1)
             requested[candy_id] = requested.get(candy_id, 0) + quantity
 
         # Lock every row this cart draws from before reading any count, so a
@@ -1561,11 +1724,49 @@ def register_routes(app):
 
         order.total_cents = subtotal
         order.platform_fee_cents = payments.platform_fee_for(subtotal)
-        db.session.flush()
+        # Checked here as well as in payments so a too-small cart is refused
+        # before anything is committed.
+        payments.require_minimum_charge(subtotal)
 
-        # If Stripe rejects the session the request aborts here and the
-        # uncommitted order (and its stock hold) is discarded on teardown.
-        checkout_url = start_checkout(order, user, return_to=data.get("return_to"))
+        # Commit the reservation before calling Stripe. That releases the row
+        # locks, so other buyers of the same items are not stuck waiting on a
+        # network round trip. "pending" plus checkout_started_at means the
+        # sweep still frees the stock if this process dies before Stripe answers.
+        order.payment_status = "pending"
+        order.checkout_started_at = utcnow()
+        db.session.commit()
+
+        try:
+            session, destination = open_checkout_session(
+                order, user, return_to=data.get("return_to")
+            )
+        except Exception:
+            # Stripe refused or failed: give the stock back straight away,
+            # unless something else (account deletion) already did.
+            db.session.rollback()
+            order = lock_order(order)
+            if order.inventory_released_at is None:
+                release_order_inventory(order)
+            if order.payment_status in OPEN_PAYMENT_STATUSES:
+                order.payment_status = "expired"
+            db.session.commit()
+            raise
+
+        # The order was visible to other requests while Stripe answered. If
+        # one of them released it (the buyer deleted their account), its stock
+        # is back on the shelf, so the new session must not go live.
+        order = lock_order(order)
+        if order.payment_status != "pending" or order.inventory_released_at is not None:
+            payments.expire_checkout_session(session.get("id"))
+            db.session.commit()
+            abort(409, description="this order was cancelled while checkout was opening")
+        if order.stripe_checkout_session_id:
+            # Another request attached a session meanwhile. Two live sessions
+            # for one order could both be paid, so this one is withdrawn.
+            payments.expire_checkout_session(session.get("id"))
+            db.session.commit()
+            abort(409, description="checkout for this order was opened elsewhere")
+        checkout_url = apply_checkout_session(order, session, destination)
         db.session.commit()
         return jsonify(order_response(order, checkout_url=checkout_url)), 201
 
@@ -1575,12 +1776,21 @@ def register_routes(app):
         """Re-open Stripe Checkout for an order the buyer did not finish."""
         order = Order.query.get_or_404(order_id)
         assert_order_access(current_user(), order)
+        # Held until the new session id is committed, so a double click or a
+        # retried request waits here and then reuses that session instead of
+        # opening a second one the buyer might pay without the order knowing.
+        order = lock_order(order)
         if order.payment_status == "paid":
             abort(400, description="this order is already paid")
         if order.payment_status not in ("pending", "unpaid"):
             abort(400, description="this order can no longer be paid; place a new one")
         if order.inventory_released_at is not None:
             abort(400, description="this checkout expired; place a new order")
+        if not order.stripe_checkout_session_id:
+            # POST /orders commits the order before Stripe answers, and attaches
+            # its session afterwards. Opening a second one here would leave two
+            # payable sessions for one order.
+            abort(409, description="checkout for this order is still opening; try again in a moment")
 
         if order.stripe_checkout_session_id:
             session = payments.retrieve_checkout_session(order.stripe_checkout_session_id)
@@ -1605,7 +1815,9 @@ def register_routes(app):
         """
         order = Order.query.get_or_404(order_id)
         assert_order_access(current_user(), order)
-        if order.payment_status == "paid":
+        # Paid, refunded and legacy orders are settled; Stripe's session for a
+        # refunded order still says "paid", so asking it again would be wrong.
+        if order.payment_status not in PAYABLE_PAYMENT_STATUSES:
             return jsonify(order_response(order))
 
         session_id = order.stripe_checkout_session_id
@@ -1615,7 +1827,7 @@ def register_routes(app):
         session = payments.retrieve_checkout_session(session_id)
         if session.get("payment_status") == "paid":
             mark_order_paid(order, session)
-        elif session.get("status") == "expired":
+        elif session.get("status") == "expired" and lock_order(order).payment_status in OPEN_PAYMENT_STATUSES:
             if order.inventory_released_at is None:
                 release_order_inventory(order)
             order.payment_status = "expired"
@@ -1627,8 +1839,21 @@ def register_routes(app):
     def cancel_order(order_id):
         order = Order.query.get_or_404(order_id)
         assert_order_access(current_user(), order)
-        if order.payment_status == "paid":
+        order = lock_order(order)
+        if order.payment_status not in PAYABLE_PAYMENT_STATUSES:
             abort(400, description="paid orders cannot be cancelled here")
+
+        # Close the Stripe page so a tab left open cannot pay for an order
+        # whose stock has gone back on the shelf. If Stripe will not expire it,
+        # find out why: the buyer may have paid a moment ago.
+        session_id = order.stripe_checkout_session_id
+        if session_id and order.payment_status in OPEN_PAYMENT_STATUSES:
+            if payments.expire_checkout_session(session_id) is None:
+                session = payments.retrieve_checkout_session(session_id)
+                if session.get("payment_status") == "paid":
+                    mark_order_paid(order, session)
+                    abort(409, description="this order was just paid, so it cannot be cancelled")
+
         if order.inventory_released_at is None:
             release_order_inventory(order)
         order.payment_status = "expired"
@@ -1659,11 +1884,23 @@ def register_routes(app):
         The order flips to "refunded" here as well as on the charge.refunded
         webhook, so the admin sees the result without waiting on delivery.
         """
-        order = Order.query.get_or_404(order_id)
+        order = lock_order(Order.query.get_or_404(order_id))
         if order.payment_status != "paid":
             abort(400, description="only paid orders can be refunded")
-        payments.refund_order(order)
+        refund = payments.refund_order(order) or {}
         order.payment_status = "refunded"
+        order.refunded_cents = order.total_cents
+        # A Connect refund sets refund_application_fee=true, but Stripe returns
+        # the fee in proportion to what this refund covers: after an earlier
+        # partial refund that kept the fee, not all of it comes back. So read
+        # the real figure; if that fails, the charge.refunded webhook records it.
+        if order.stripe_destination_account_id:
+            fee_refunded = payments.charge_fee_refunded_cents(refund.get("charge"))
+            if fee_refunded is not None:
+                order.platform_fee_refunded_cents = max(
+                    order.platform_fee_refunded_cents or 0,
+                    min(fee_refunded, order.platform_fee_cents or 0),
+                )
         db.session.commit()
         return jsonify(order_response(order))
 
@@ -1699,21 +1936,62 @@ def register_routes(app):
 
         order = _order_for_session(session)
         if order is None:
+            if event_type == "charge.refunded" and session.get("payment_intent"):
+                # Probably a refund that overtook its checkout.session.completed:
+                # until that lands, the order does not know its payment intent.
+                # A non-2xx makes Stripe redeliver this later instead of losing it.
+                return jsonify(received=True, handled=False, retry=True), 409
             return jsonify(received=True, handled=False)
 
         if event_type == "checkout.session.completed":
+            # Any of the order's sessions: a paid one is real money, even if a
+            # resume has since replaced it (mark_order_paid adopts it).
             if session.get("payment_status") == "paid":
                 mark_order_paid(order, session)
         elif event_type == "checkout.session.expired":
-            if order.payment_status not in ("paid", "refunded"):
-                if order.inventory_released_at is None:
-                    release_order_inventory(order)
-                order.payment_status = "expired"
+            # A resumed checkout replaces the order's session, and Stripe may
+            # deliver the old one's expiry late. Only the live session's
+            # expiry says the buyer can no longer pay.
+            order = lock_order(order)
+            if (
+                session.get("id") != order.stripe_checkout_session_id
+                or order.payment_status not in OPEN_PAYMENT_STATUSES
+            ):
                 db.session.commit()
-        elif event_type in ("charge.refunded", "charge.refund.updated"):
-            if order.payment_status == "paid":
-                order.payment_status = "refunded"
-                db.session.commit()
+                return jsonify(received=True, handled=False)
+            if order.inventory_released_at is None:
+                release_order_inventory(order)
+            order.payment_status = "expired"
+            db.session.commit()
+        elif event_type == "charge.refunded":
+            order = lock_order(order)
+            # Recorded whatever the payment state: the refund can arrive
+            # before the completion it belongs to (mark_order_paid honours it),
+            # and an order already "refunded" may only have been partly
+            # refunded under the old handler, so its real amount is taken too.
+            # Amounts only ever grow, so a redelivered event changes nothing.
+            if order.payment_status in ("paid", "refunded") + PAYABLE_PAYMENT_STATUSES:
+                # Sent for partial refunds too. Those leave goods to hand
+                # over, so the order stays in the pickup queue, but the amount
+                # is recorded so revenue and payouts stop counting it.
+                refunded = session.get("amount_refunded")
+                if isinstance(refunded, int) and not isinstance(refunded, bool):
+                    order.refunded_cents = max(
+                        order.refunded_cents or 0, min(refunded, order.total_cents or 0)
+                    )
+                fee_refunded = payments.application_fee_refunded_cents(
+                    session.get("application_fee")
+                )
+                if fee_refunded is not None:
+                    order.platform_fee_refunded_cents = max(
+                        order.platform_fee_refunded_cents or 0,
+                        min(fee_refunded, order.platform_fee_cents or 0),
+                    )
+                if payments.charge_fully_refunded(session):
+                    order.refunded_cents = order.total_cents
+                    if order.payment_status == "paid":
+                        order.payment_status = "refunded"
+            db.session.commit()
 
         return jsonify(received=True, handled=True)
 
@@ -1790,32 +2068,51 @@ def register_routes(app):
         """
         paid = Order.query.filter(Order.payment_status == "paid")
 
-        def totals(query):
-            row = query.with_entities(
-                func.coalesce(func.sum(Order.total_cents), 0),
-                func.coalesce(func.sum(Order.platform_fee_cents), 0),
-                func.count(Order.id),
-            ).one()
-            return int(row[0]), int(row[1]), int(row[2])
+        net_total = Order.total_cents - func.coalesce(Order.refunded_cents, 0)
+        # The fee Stripe kept for the platform, after any fee refund.
+        net_fee = Order.platform_fee_cents - func.coalesce(Order.platform_fee_refunded_cents, 0)
+        # Clamped per order, like Order.seller_payout_cents: a heavily refunded
+        # order owes its seller nothing, and must not reduce other orders' share.
+        seller_share = case((net_total - net_fee > 0, net_total - net_fee), else_=0)
 
-        gross_cents, fee_cents, order_count = totals(paid)
-        connect_gross, connect_fee, connect_count = totals(
+        def totals(query):
+            # Gross is net of partial refunds; a fully refunded order is not
+            # "paid" and is excluded altogether.
+            row = query.with_entities(
+                func.coalesce(func.sum(net_total), 0),
+                func.coalesce(func.sum(net_fee), 0),
+                func.count(Order.id),
+                func.coalesce(func.sum(seller_share), 0),
+            ).one()
+            return int(row[0]), int(row[1]), int(row[2]), int(row[3])
+
+        partially_refunded_cents = int(
+            paid.with_entities(
+                func.coalesce(func.sum(func.coalesce(Order.refunded_cents, 0)), 0)
+            ).scalar()
+        )
+
+        gross_cents, fee_cents, order_count, payout_cents = totals(paid)
+        _, _, connect_count, connect_payout = totals(
             paid.filter(Order.stripe_destination_account_id.isnot(None))
         )
-        manual_gross, manual_fee, manual_count = totals(
+        _, _, manual_count, manual_payout = totals(
             paid.filter(Order.stripe_destination_account_id.is_(None))
         )
         return jsonify(
             paid_order_count=order_count,
             gross_cents=gross_cents,
+            # Partial refunds on orders that are still paid; already taken out
+            # of gross_cents.
+            partially_refunded_cents=partially_refunded_cents,
             platform_fee_cents=fee_cents,
             # Every seller share, however it is paid. Kept for compatibility.
-            seller_payout_cents=max(0, gross_cents - fee_cents),
+            seller_payout_cents=payout_cents,
             connect_order_count=connect_count,
-            connect_seller_payout_cents=max(0, connect_gross - connect_fee),
+            connect_seller_payout_cents=connect_payout,
             manual_order_count=manual_count,
             # What the platform still has to pay sellers itself.
-            seller_payout_owed_cents=max(0, manual_gross - manual_fee),
+            seller_payout_owed_cents=manual_payout,
             platform_fee_percent=app.config["PLATFORM_FEE_PERCENT"],
             platform_fee_flat_cents=app.config["PLATFORM_FEE_FLAT_CENTS"],
         )

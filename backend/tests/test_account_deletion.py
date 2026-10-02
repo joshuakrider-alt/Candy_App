@@ -154,7 +154,7 @@ def test_an_admin_cannot_delete_its_own_account(client, admin):
 
 def test_a_wrong_password_confirmation_stops_the_deletion(client, buyer):
     refused = buyer.delete("/me", json={"password": "not-my-password"})
-    assert refused.status_code == 401
+    assert refused.status_code == 403
     login(client, "alice@example.com", BUYER_PASSWORD)
 
     assert buyer.delete("/me", json={"password": BUYER_PASSWORD}).status_code == 204
