@@ -277,8 +277,9 @@ branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
 - Staging data scrubbed (Joshua's go, after a Codex review on PR #21), on the
   `staging` branch only: every user's name and email replaced with
   `Staging user <id>` / `user<id>@staging.invalid`, every password hash
-  replaced with one for a discarded random password, photo keys and identity
-  session ids cleared; seller contact name/email replaced the same way and
+  replaced with one for a discarded random password, photo keys cleared and
+  Stripe Identity state reset to `unstarted` (session id, verified time and
+  error code cleared); seller contact name/email replaced the same way and
   Stripe Connect ids and readiness flags cleared, so real logins do not work on
   staging and test-mode Connect onboarding starts fresh. Shops, items and
   orders are kept. Checked afterwards: 0 real emails, 0 live Connect ids.
