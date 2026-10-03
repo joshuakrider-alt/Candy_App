@@ -274,6 +274,14 @@ branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
 - Staging env set (values not logged): `DATABASE_URL` (staging branch),
   `JWT_SECRET_KEY` (new, different from production), `PUBLIC_SITE_URL` =
   `https://beta.neighborhoodcandylady.com`.
+- Staging data scrubbed (Joshua's go, after a Codex review on PR #21), on the
+  `staging` branch only: every user's name and email replaced with
+  `Staging user <id>` / `user<id>@staging.invalid`, every password hash
+  replaced with one for a discarded random password, photo keys and identity
+  session ids cleared; seller contact name/email replaced the same way and
+  Stripe Connect ids and readiness flags cleared, so real logins do not work on
+  staging and test-mode Connect onboarding starts fresh. Shops, items and
+  orders are kept. Checked afterwards: 0 real emails, 0 live Connect ids.
 
 ### Still open (needs Joshua)
 - Stripe test mode: set `STRIPE_SECRET_KEY` (`sk_test_…`) and
@@ -284,7 +292,11 @@ branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
 - Custom domain `api-staging.neighborhoodcandylady.com`: add it to the staging
   service in Render, then add the CNAME Render shows in Vercel DNS.
 - `CORS_ORIGINS` left unset (defaults to `*`); Day 0 task 5 sets it.
-- The staging branch holds a copy of real customer accounts and orders.
+- No admin can log in to staging after the scrub: set `ADMIN_BOOTSTRAP_EMAIL`
+  and `ADMIN_BOOTSTRAP_PASSWORD` on the staging service (staging-only values),
+  redeploy, then remove them.
+- Copied paid orders still carry live Stripe payment ids; refunding them on
+  staging will fail in test mode.
 
 ## Logging rule
 
