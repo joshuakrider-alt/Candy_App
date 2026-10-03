@@ -254,6 +254,21 @@ no API, environment variable, Stripe, Render or Vercel setting was changed.
 - Live only after this PR is merged and Vercel deploys `main`.
 - `JWT_SECRET_KEY` confirmed set on Render by Joshua (Day 0 task 2).
 
+## 2026-10-03 — Admin link in the site menu (Claude Code)
+
+Frontend only; no API, environment, Stripe, Render or Vercel change.
+
+- No page linked to `/admin.html`, so an admin could not find where to approve
+  seller applications. A signed-in admin now gets an "Admin" link in the top
+  menu of every page, before "Log out" where a page has one.
+- Shown only when a session token is stored and the stored user's role is
+  `admin`; it appears on sign-in and disappears on sign-out without a reload,
+  including from another tab. This is a convenience, not access control: the
+  dashboard and every admin API route still check the role on the server.
+- Verified in headless Chromium against intercepted API responses: admin sees
+  one link on 5 pages, buyers, signed-out visitors and a stale record without
+  a token see none, no JavaScript errors.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
