@@ -828,3 +828,211 @@ def test_the_api_refuses_to_start_on_a_real_database_with_the_default_jwt_secret
                 "JWT_SECRET_KEY": DEFAULT_JWT_SECRET,
             }
         )
+
+
+# --- Seller stock edits while checkouts hold units -----------------------------
+
+
+def seller_row(seller, seller_id, candy_id):
+    rows = seller.get(f"/sellers/{seller_id}/inventory").get_json()
+    return next(row for row in rows if row["candy_id"] == candy_id)
+
+
+def let_the_sweep_release(app, client, order_id):
+    with app.app_context():
+        row = db.session.get(Order, order_id)
+        row.checkout_started_at = utcnow() - timedelta(hours=2)
+        db.session.commit()
+    client.get("/shops")
+
+
+def test_the_dashboard_shows_units_held_by_open_checkouts(client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    kiki_seller.put(f"/sellers/{seller_id}/inventory/{candy_id}", json={"on_hand_count": 10})
+
+    place_order(buyer, seller_id, candy_id, quantity=3)
+
+    row = seller_row(kiki_seller, seller_id, candy_id)
+    assert row["inventory_count"] == 7
+    assert row["reserved_count"] == 3
+    assert row["on_hand_count"] == 10
+
+
+def test_a_shelf_count_typed_during_a_checkout_is_not_inflated_when_it_is_abandoned(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    """10 on the shelf, 3 held. The seller counts 10; the release must not make 13."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+
+    saved = kiki_seller.put(url, json={"on_hand_count": 10}).get_json()
+    assert saved["inventory_count"] == 7
+    assert saved["on_hand_count"] == 10
+
+    let_the_sweep_release(app, client, order["id"])
+    assert inventory_count(client, seller_id, candy_id) == 10
+
+
+def test_resaving_the_shelf_count_does_not_wipe_a_reservation(client, buyer, kiki_seller, fake_stripe):
+    """The seller's screen predates the checkout; saving it must keep the 3 sold."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    on_screen = seller_row(kiki_seller, seller_id, candy_id)["on_hand_count"]
+
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    kiki_seller.put(url, json={"on_hand_count": on_screen})
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+    assert buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()["payment_status"] == "paid"
+
+    assert inventory_count(client, seller_id, candy_id) == 7
+
+
+def test_a_shelf_count_below_the_held_units_leaves_nothing_for_sale(client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    place_order(buyer, seller_id, candy_id, quantity=3)
+
+    row = kiki_seller.put(url, json={"on_hand_count": 2}).get_json()
+    assert row["inventory_count"] == 0
+    assert row["status"] == "out-of-stock"
+
+
+def test_on_hand_count_wins_over_the_legacy_field(client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    place_order(buyer, seller_id, candy_id, quantity=3)
+
+    row = kiki_seller.put(url, json={"on_hand_count": 10, "inventory_count": 10}).get_json()
+    assert row["inventory_count"] == 7
+    # On its own the legacy field still sets the sellable count directly.
+    assert kiki_seller.put(url, json={"inventory_count": 4}).get_json()["inventory_count"] == 4
+
+
+def test_editing_an_own_item_takes_the_shelf_count(client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    created = kiki_seller.post(
+        f"/sellers/{seller_id}/items",
+        json={"name": "Shelf Test Taffy", "price_cents": 150, "inventory_count": 10},
+    ).get_json()
+    candy_id = created["candy_id"]
+    assert created["on_hand_count"] == 10
+    place_order(buyer, seller_id, candy_id, quantity=3)
+
+    row = kiki_seller.put(
+        f"/sellers/{seller_id}/items/{candy_id}",
+        json={"name": "Shelf Test Taffy", "price_cents": 150, "on_hand_count": 10},
+    ).get_json()
+    assert row["inventory_count"] == 7
+    assert row["reserved_count"] == 3
+
+
+@pytest.mark.parametrize("count", [-1, 1.5, "ten", True])
+def test_a_malformed_on_hand_count_is_a_400(client, kiki_seller, count):
+    seller_id = kiki_seller.user["seller_id"]
+    item = first_in_stock_item(client, seller_id)
+    response = kiki_seller.put(
+        f"/sellers/{seller_id}/inventory/{item['candy_id']}", json={"on_hand_count": count}
+    )
+    assert response.status_code == 400
+
+
+@postgres_only
+def test_a_stock_edit_waits_for_a_reservation_that_is_committing(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    """A checkout holds the row lock; the seller's save must see its result."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+
+    order_id = place_order(buyer, seller_id, candy_id, quantity=3).get_json()["id"]
+    let_the_sweep_release(app, client, order_id)
+
+    engine = create_engine(os.environ["TEST_DATABASE_URL"])
+    locked = threading.Event()
+
+    def checkout_in_flight():
+        # Stands in for create_order between its lock and its commit.
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "SELECT 1 FROM seller_inventory WHERE seller_id = :s AND candy_id = :c FOR UPDATE"
+                ),
+                {"s": seller_id, "c": candy_id},
+            )
+            locked.set()
+            time.sleep(0.5)
+            connection.execute(
+                text(
+                    "UPDATE seller_inventory SET inventory_count = inventory_count - 3 "
+                    "WHERE seller_id = :s AND candy_id = :c"
+                ),
+                {"s": seller_id, "c": candy_id},
+            )
+            connection.execute(
+                text(
+                    "UPDATE \"order\" SET payment_status = 'pending', inventory_released_at = NULL, "
+                    "checkout_started_at = now() AT TIME ZONE 'utc' WHERE id = :o"
+                ),
+                {"o": order_id},
+            )
+
+    worker = threading.Thread(target=checkout_in_flight)
+    worker.start()
+    locked.wait(5)
+    saved = kiki_seller.put(url, json={"on_hand_count": 10}).get_json()
+    worker.join(10)
+    engine.dispose()
+
+    assert saved["reserved_count"] == 3
+    assert saved["inventory_count"] == 7
+    assert inventory_count(client, seller_id, candy_id) == 7
+
+
+# --- A payment that lands after its stock was resold ----------------------------
+
+
+def test_a_late_payment_for_resold_stock_is_flagged_as_short(app, client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    kiki_seller.put(f"/sellers/{seller_id}/inventory/{candy_id}", json={"on_hand_count": 3})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    late_session = fake_stripe.last_session_id
+
+    let_the_sweep_release(app, client, order["id"])
+    # The released units go to a second buyer, then the first one pays.
+    place_order(buyer, seller_id, candy_id, quantity=2)
+    fake_stripe.mark_paid(late_session)
+    paid = buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()
+
+    assert paid["payment_status"] == "paid"
+    assert paid["stock_shortfall"] == 2
+    assert inventory_count(client, seller_id, candy_id) == 0
+    queue = kiki_seller.get(f"/sellers/{seller_id}/orders").get_json()
+    assert next(row for row in queue if row["id"] == order["id"])["stock_shortfall"] == 2
+
+
+def test_a_late_payment_with_stock_still_on_the_shelf_is_not_flagged(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    kiki_seller.put(f"/sellers/{seller_id}/inventory/{candy_id}", json={"on_hand_count": 5})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    let_the_sweep_release(app, client, order["id"])
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+
+    paid = buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()
+    assert paid["stock_shortfall"] == 0
+    assert inventory_count(client, seller_id, candy_id) == 2

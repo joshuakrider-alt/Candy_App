@@ -1319,6 +1319,7 @@ if (sellerApp) {
               data-candy-id="${item.candy_id}"
               data-stock-status="${item.status}"
               data-inventory-count="${item.inventory_count}"
+              data-on-hand-count="${item.on_hand_count ?? item.inventory_count}"
             >
               <div>
                 <p class="card-label">${owned ? "Your item" : "From platform catalog"}</p>
@@ -1328,7 +1329,11 @@ if (sellerApp) {
               <div class="inventory-meta">
                 <span>${formatCents(item.candy.price_cents)} · ${
                   item.inventory_count
-                } left</span>
+                } left${
+                  item.reserved_count
+                    ? ` · ${item.reserved_count} held in open checkouts`
+                    : ""
+                }</span>
                 <strong data-stock-label>${titleCase(item.status)}</strong>
                 <button class="mini-action" type="button" data-toggle-stock>${
                   item.status === "out-of-stock" ? "Mark in stock" : "Mark out"
@@ -1363,6 +1368,13 @@ if (sellerApp) {
                   order.pickup_code || "no code"
                 )}</strong>
                 <p>${lines}</p>
+                ${
+                  order.stock_shortfall
+                    ? `<p class="order-message">Short ${order.stock_shortfall} item${
+                        order.stock_shortfall === 1 ? "" : "s"
+                      }: this payment came in after the checkout timed out and the stock was sold again. Check your shelf, and ask the admin for a refund if you cannot fill it.</p>`
+                    : ""
+                }
                 <p>${escapeHtml(order.buyer_name || "Buyer")} · ${paidLabel} · you keep ${formatCents(
                   order.seller_payout_cents
                 )} of ${formatCents(order.total_cents)}</p>
@@ -1434,7 +1446,9 @@ if (sellerApp) {
             auth: true,
           });
         } else {
-          const current = Number(card.dataset.inventoryCount) || 0;
+          // The shelf count includes units held by open checkouts; the API
+          // takes those back off, so they are not counted twice.
+          const current = Number(card.dataset.onHandCount) || 0;
           const name = window.prompt("Item name", card.querySelector("h3").textContent);
           if (name === null) return;
           const price = window.prompt("Price in dollars", card.querySelector(".inventory-meta span").textContent.split(" · ")[0].replace("$", ""));
@@ -1444,7 +1458,10 @@ if (sellerApp) {
             card.querySelector("[data-item-description]").textContent
           );
           if (description === null) return;
-          const stock = window.prompt("Stock quantity", String(current));
+          const stock = window.prompt(
+            "How many are on your shelf? (Leave out ones packed for paid orders.)",
+            String(current)
+          );
           if (stock === null) return;
           const priceCents = Math.round(Number(price) * 100);
           await api(`/sellers/${sellerId}/items/${card.dataset.candyId}`, {
@@ -1454,6 +1471,8 @@ if (sellerApp) {
               name,
               description,
               price_cents: priceCents,
+              on_hand_count: Number(stock),
+              // Read only by an API from before on_hand_count.
               inventory_count: Number(stock),
             },
           });
@@ -1472,6 +1491,8 @@ if (sellerApp) {
     const body = currentlyOut
       ? {
           status: "in-stock",
+          on_hand_count: Math.max(8, Number(card.dataset.onHandCount) || 0),
+          // Read only by an API from before on_hand_count.
           inventory_count: Math.max(8, Number(card.dataset.inventoryCount) || 0),
         }
       : { status: "out-of-stock" };

@@ -254,6 +254,24 @@ no API, environment variable, Stripe, Render or Vercel setting was changed.
 - Live only after this PR is merged and Vercel deploys `main`.
 - `JWT_SECRET_KEY` confirmed set on Render by Joshua (Day 0 task 2).
 
+## 2026-10-03 — Seller stock edits during open checkouts
+
+- Seller stock saves set an absolute count with no row lock, so a save could
+  overwrite a reservation that was committing, and a shelf count typed while
+  a checkout held units was inflated when that checkout was abandoned
+  (10 on the shelf, 3 held, seller types 10, release makes it 13).
+- Both stock PUT routes now lock the shelf row (same lock as checkout and the
+  sweep). The seller dashboard sends `on_hand_count` (what is on the shelf);
+  the API subtracts units held by open checkouts. `inventory_count` alone keeps
+  its old meaning. Seller inventory responses add `reserved_count` and
+  `on_hand_count`.
+- A payment that lands after the sweep released its stock, when that stock has
+  since been sold, now records `order.stock_shortfall` (new column, boot
+  migration, default 0) and logs a warning. The seller order queue shows it.
+- Known limit: marking an item "out" while a checkout holds units still lets
+  those units come back if that checkout is abandoned.
+- Deploy order does not matter: the dashboard sends both fields.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
