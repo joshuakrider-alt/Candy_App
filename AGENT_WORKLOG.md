@@ -223,6 +223,37 @@ Vercel settings were changed. Not deployed.
 - Before merging, confirm `JWT_SECRET_KEY` is set on Render. If it is not, the
   new deploy will fail to start (Render keeps the previous deploy serving).
 
+## 2026-10-03 — Close the `?api=` override hole in the live site (Claude Code)
+
+Day 0 task 1 of the Next.js migration plan, shipped on its own. Frontend only;
+no API, environment variable, Stripe, Render or Vercel setting was changed.
+
+### Problem
+- `app.js` accepted `?api=<any URL>` on every host and saved it in
+  `localStorage` (`candyLadyApiBase`). One crafted link to the real site made
+  the visitor's browser send sign-in passwords and session tokens to that URL,
+  on that visit and every later one.
+
+### Fix
+- Overrides (`?api=`, `window.CANDY_LADY_API_BASE_URL`) are honoured only when
+  the page is served from `localhost` or `127.0.0.1`, and only for `http(s)`
+  URLs.
+- On any other host the frontend always uses
+  `https://api.neighborhoodcandylady.com` and deletes a saved override, so
+  browsers poisoned before this fix are cleaned on their next visit.
+- `README.md` documents the local-only rule.
+
+### Verified
+- Headless Chromium, every network request intercepted, the site served under
+  `www.neighborhoodcandylady.com` and under `localhost:5500`. Old code: a
+  `?api=` link sent the buyer sign-in `POST /login` to the foreign host and
+  kept it saved. New code: the live host only contacts the real API and the
+  saved override is erased; localhost overrides still work.
+
+### Still open
+- Live only after this PR is merged and Vercel deploys `main`.
+- `JWT_SECRET_KEY` confirmed set on Render by Joshua (Day 0 task 2).
+
 ## 2026-10-03 — Seller stock edits during open checkouts
 
 - Seller stock saves set an absolute count with no row lock, so a save could

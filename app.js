@@ -9,21 +9,69 @@ const LOCAL_API_BASE_URL = "http://127.0.0.1:5000";
 const API_BASE_OVERRIDE_KEY = "candyLadyApiBase";
 
 // Vercel serves these files without a build step, so there is no place to
-// inject an env var. The base URL can still be pointed at a local API with
-// ?api=http://127.0.0.1:5000 (remembered afterwards) or by setting
-// window.CANDY_LADY_API_BASE_URL before this script runs.
+// inject an env var. For local development only, the base URL can be pointed
+// at another API with ?api=http://127.0.0.1:5000 (remembered afterwards) or by
+// setting window.CANDY_LADY_API_BASE_URL before this script runs.
+//
+// Overrides are honoured only when the page itself is served from localhost.
+// On the real site a link carrying ?api=https://someone-else.example would
+// otherwise send every sign-in password and session token to that server, and
+// the browser would keep doing so on later visits. So on any other host the
+// override is ignored and any address saved by an earlier visit is erased.
+const LOCAL_HOSTNAMES = ["localhost", "127.0.0.1"];
+
+const safeStorage = {
+  get(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Storage can be unavailable (private mode, blocked site data).
+    }
+  },
+  remove(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Nothing to clean up if storage cannot be reached.
+    }
+  },
+};
+
+// Only plain http(s) origins are accepted, so a typo or a javascript: URL
+// cannot become the API base even on a developer's machine.
+const normalizeApiBase = (value) => {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+};
+
 const resolveApiBaseUrl = () => {
-  const trim = (value) => String(value).replace(/\/+$/, "");
-  const fromQuery = new URLSearchParams(window.location.search).get("api");
+  if (!LOCAL_HOSTNAMES.includes(window.location.hostname)) {
+    safeStorage.remove(API_BASE_OVERRIDE_KEY);
+    return DEFAULT_API_BASE_URL;
+  }
+
+  const fromQuery = normalizeApiBase(
+    new URLSearchParams(window.location.search).get("api") || ""
+  );
   if (fromQuery) {
-    localStorage.setItem(API_BASE_OVERRIDE_KEY, trim(fromQuery));
+    safeStorage.set(API_BASE_OVERRIDE_KEY, fromQuery);
   }
   const override =
-    window.CANDY_LADY_API_BASE_URL || localStorage.getItem(API_BASE_OVERRIDE_KEY);
-  if (override) return trim(override);
-  const { hostname } = window.location;
-  if (hostname === "localhost" || hostname === "127.0.0.1") return LOCAL_API_BASE_URL;
-  return DEFAULT_API_BASE_URL;
+    normalizeApiBase(window.CANDY_LADY_API_BASE_URL || "") ||
+    normalizeApiBase(safeStorage.get(API_BASE_OVERRIDE_KEY) || "");
+  return override || LOCAL_API_BASE_URL;
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
