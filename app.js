@@ -148,18 +148,76 @@ const session = {
   save({ access_token: accessToken, user }) {
     if (accessToken) localStorage.setItem(this.tokenKey, accessToken);
     if (user) storage.set(this.userKey, user);
+    this.changed();
   },
   setUser(user) {
     storage.set(this.userKey, user);
+    this.changed();
   },
   clear() {
     localStorage.removeItem(this.tokenKey);
     storage.remove(this.userKey);
+    this.changed();
   },
   isLoggedIn() {
     return Boolean(this.getToken());
   },
+  isAdmin() {
+    try {
+      const user = this.getUser();
+      return this.isLoggedIn() && Boolean(user) && user.role === "admin";
+    } catch {
+      return false; // storage blocked: nobody is signed in on this page
+    }
+  },
+  changed() {
+    window.dispatchEvent(new CustomEvent("candy-session-changed"));
+  },
 };
+
+/* ------------------------------------------------------------------ */
+/* Admin shortcut in the site menu                                    */
+/*                                                                    */
+/* No page links to the admin dashboard, so a signed-in admin gets an */
+/* "Admin" link in the top menu of every page. Hiding it from         */
+/* everyone else is a convenience, not a security control: the        */
+/* dashboard asks the API who you are, and every admin route checks   */
+/* the role on the server.                                            */
+/* ------------------------------------------------------------------ */
+
+const ADMIN_PATH = "/admin.html";
+
+const renderAdminLink = () => {
+  const showLink = session.isAdmin();
+  document.querySelectorAll(".topbar-links").forEach((links) => {
+    const existing = links.querySelector("[data-admin-link]");
+    if (!showLink) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) return;
+
+    const link = document.createElement("a");
+    link.href = ADMIN_PATH;
+    link.textContent = "Admin";
+    link.setAttribute("data-admin-link", "");
+    if (window.location.pathname === ADMIN_PATH) {
+      link.classList.add("active-link");
+      link.setAttribute("aria-current", "page");
+    }
+    // Before the Log out button where a page has one, else at the end.
+    links.insertBefore(link, links.querySelector("[data-logout]"));
+  });
+};
+
+window.addEventListener("candy-session-changed", renderAdminLink);
+// Signing in or out in another tab updates this one too.
+window.addEventListener("storage", (event) => {
+  if (event.key === null || event.key === session.tokenKey || event.key === session.userKey) {
+    renderAdminLink();
+  }
+});
+renderAdminLink();
 
 const api = async (path, { method = "GET", body, auth = false } = {}) => {
   const headers = {};
