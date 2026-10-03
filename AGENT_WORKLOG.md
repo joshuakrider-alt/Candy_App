@@ -254,6 +254,51 @@ no API, environment variable, Stripe, Render or Vercel setting was changed.
 - Live only after this PR is merged and Vercel deploys `main`.
 - `JWT_SECRET_KEY` confirmed set on Render by Joshua (Day 0 task 2).
 
+## 2026-10-03 — Test-mode staging API, part 1 (Claude Code)
+
+Day 0 task 3 of the Next.js migration plan. Production (Neon `production`
+branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
+
+### Done
+- Day 0 task 2 closed: Joshua confirmed `JWT_SECRET_KEY` is set on the
+  production API.
+- Neon project `CandyLadyApp`: new branch `staging` (`br-muddy-fire-ay664xbo`),
+  copied from `production` on 2026-10-03 (14 users, 2 sellers, 12 orders, none
+  open). The branch's `neondb_owner` password was reset, so the staging
+  connection string cannot open the production branch.
+- Render: new web service `Candy-Lady-api-staging` (`srv-db0h0ls9v7es73bdencg`),
+  free plan, Ohio, `main` with auto-deploy, build
+  `cd backend && pip install -r requirements.txt`, start
+  `cd backend && gunicorn app:app`, URL
+  `https://candy-lady-api-staging.onrender.com`.
+- Staging env set (values not logged): `DATABASE_URL` (staging branch),
+  `JWT_SECRET_KEY` (new, different from production), `PUBLIC_SITE_URL` =
+  `https://beta.neighborhoodcandylady.com`.
+- Staging data scrubbed (Joshua's go, after a Codex review on PR #21), on the
+  `staging` branch only: every user's name and email replaced with
+  `Staging user <id>` / `user<id>@staging.invalid`, every password hash
+  replaced with one for a discarded random password, photo keys cleared and
+  Stripe Identity state reset to `unstarted` (session id, verified time and
+  error code cleared); seller contact name/email replaced the same way and
+  Stripe Connect ids and readiness flags cleared, so real logins do not work on
+  staging and test-mode Connect onboarding starts fresh. Shops, items and
+  orders are kept. Checked afterwards: 0 real emails, 0 live Connect ids.
+
+### Still open (needs Joshua)
+- Stripe test mode: set `STRIPE_SECRET_KEY` (`sk_test_…`) and
+  `STRIPE_PUBLISHABLE_KEY` (`pk_test_…`) on the staging service; add a
+  test-mode webhook at `…/stripe/webhook` for `checkout.session.completed`,
+  `checkout.session.expired`, `charge.refunded` and put its secret in
+  `STRIPE_WEBHOOK_SECRET`. Until then staging has payments off.
+- Custom domain `api-staging.neighborhoodcandylady.com`: add it to the staging
+  service in Render, then add the CNAME Render shows in Vercel DNS.
+- `CORS_ORIGINS` left unset (defaults to `*`); Day 0 task 5 sets it.
+- No admin can log in to staging after the scrub: set `ADMIN_BOOTSTRAP_EMAIL`
+  and `ADMIN_BOOTSTRAP_PASSWORD` on the staging service (staging-only values),
+  redeploy, then remove them.
+- Copied paid orders still carry live Stripe payment ids; refunding them on
+  staging will fail in test mode.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
