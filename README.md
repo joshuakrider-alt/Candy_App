@@ -320,6 +320,12 @@ Then open `http://localhost:5500/buyer.html`. A frontend served from
 else, load any page with `?api=https://your-api.example.com` (remembered in
 `localStorage`) or set `window.CANDY_LADY_API_BASE_URL` before `app.js` runs.
 
+Both overrides work only when the page itself is served from `localhost` or
+`127.0.0.1`. On any other host, including the live site and Vercel previews,
+the frontend always uses `https://api.neighborhoodcandylady.com` and erases any
+override saved by an earlier visit. Otherwise a link carrying `?api=` could send
+visitors' passwords and session tokens to another server.
+
 Because `CORS_ORIGINS` includes `http://localhost:5500`, Stripe returns the
 buyer to the local frontend instead of the production domain.
 
