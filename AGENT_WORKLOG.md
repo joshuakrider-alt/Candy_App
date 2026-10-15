@@ -269,6 +269,27 @@ Frontend only; no API, environment, Stripe, Render or Vercel change.
   one link on 5 pages, buyers, signed-out visitors and a stale record without
   a token see none, no JavaScript errors.
 
+## 2026-10-15 — Day 0 migration checklist checkpoint (Coda)
+
+The Next.js migration plan document referenced in earlier entries is not in
+the repo (checked `main`, both `park/` branches, and GitHub issues), so the
+verified Day 0 status is recorded here.
+
+| Task | Status |
+| --- | --- |
+| 1. Close the `?api=` hole | Done — PR #20 merged Oct 3 |
+| 2. Confirm `JWT_SECRET_KEY` on Render | Done — confirmed by Joshua Oct 3 |
+| 3. Test-mode staging API | Half done — Neon staging DB branch + Render staging service (`candy-lady-api-staging.onrender.com`) live, PII scrubbed (worklog entry in open PR #21). Still needed: Stripe test keys + test-mode webhook on the staging service, `api-staging.neighborhoodcandylady.com` DNS, one-time admin bootstrap |
+| 4. Second Vercel project on Pro | Not started — no record in repo or worklog |
+| 5. Add new site addresses to `CORS_ORIGINS` | Not done — staging still allows every origin |
+| 6. Cloudflare R2 photo storage | Not started — no record in repo or worklog |
+
+Shipped since the plan was written: PR #19 (order/payment correctness, Oct 2),
+PR #23 (admin menu link, Oct 3). Still open: PR #21 (staging worklog, safe to
+merge), PR #22 (stock-reservation fix, draft — needs un-draft, rebase onto
+`main`, then merge), PR #10 (Sept 12 Cloud Agent dev environment, likely
+stale). Next.js build not started; no `web/` folder yet.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
