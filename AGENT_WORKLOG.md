@@ -254,6 +254,21 @@ no API, environment variable, Stripe, Render or Vercel setting was changed.
 - Live only after this PR is merged and Vercel deploys `main`.
 - `JWT_SECRET_KEY` confirmed set on Render by Joshua (Day 0 task 2).
 
+## 2026-10-03 — Admin link in the site menu (Claude Code)
+
+Frontend only; no API, environment, Stripe, Render or Vercel change.
+
+- No page linked to `/admin.html`, so an admin could not find where to approve
+  seller applications. A signed-in admin now gets an "Admin" link in the top
+  menu of every page, before "Log out" where a page has one.
+- Shown only when a session token is stored and the stored user's role is
+  `admin`; it appears on sign-in and disappears on sign-out without a reload,
+  including from another tab. This is a convenience, not access control: the
+  dashboard and every admin API route still check the role on the server.
+- Verified in headless Chromium against intercepted API responses: admin sees
+  one link on 5 pages, buyers, signed-out visitors and a stale record without
+  a token see none, no JavaScript errors.
+
 ## 2026-10-03 — Test-mode staging API, part 1 (Claude Code)
 
 Day 0 task 3 of the Next.js migration plan. Production (Neon `production`
@@ -298,6 +313,38 @@ branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
   redeploy, then remove them.
 - Copied paid orders still carry live Stripe payment ids; refunding them on
   staging will fail in test mode.
+## 2026-10-15 — Day 0 migration checklist checkpoint (Coda)
+
+The Next.js migration plan document referenced in earlier entries is not in
+the repo (checked `main`, both `park/` branches, and GitHub issues), so the
+verified Day 0 status is recorded here.
+
+| Task | Status |
+| --- | --- |
+| 1. Close the `?api=` hole | Done — PR #20 merged Oct 3 |
+| 2. Confirm `JWT_SECRET_KEY` on Render | Done — confirmed by Joshua Oct 3 |
+| 3. Test-mode staging API | Half done — Neon staging DB branch + Render staging service (`candy-lady-api-staging.onrender.com`) live, PII scrubbed (worklog entry in open PR #21). Still needed: Stripe test keys + test-mode webhook on the staging service, `api-staging.neighborhoodcandylady.com` DNS, one-time admin bootstrap |
+| 4. Second Vercel project on Pro | Not started — no record in repo or worklog |
+| 5. Add new site addresses to `CORS_ORIGINS` | Not done — staging still allows every origin |
+| 6. Cloudflare R2 photo storage | Not started — no record in repo or worklog |
+
+Shipped since the plan was written: PR #19 (order/payment correctness, Oct 2),
+PR #23 (admin menu link, Oct 3). Still open: PR #21 (staging worklog, safe to
+merge), PR #22 (stock-reservation fix, draft — needs un-draft, rebase onto
+`main`, then merge), PR #10 (Sept 12 Cloud Agent dev environment, likely
+stale). Next.js build not started; no `web/` folder yet.
+## 2026-10-15 — Test-mode staging API, part 2 (Claude Code)
+
+Day 0 task 3, resumed after the Oct 5 pause. Production records and services
+were not changed.
+
+- Vercel DNS: added `api-staging` CNAME → `candy-lady-api-staging.onrender.com`
+  (TTL 60). Existing records untouched. Render still has to be told about the
+  domain (staging service → Settings → Custom Domains) before it serves on it.
+- Staging service checked on Render: still serving `e3b16fa`; no deploys or env
+  changes since Oct 3, so Stripe test keys, webhook secret and admin bootstrap
+  are still unset. Auto-deploy did not pick up later `main` merges (backend
+  code unchanged since `e3b16fa`).
 
 ## Logging rule
 
