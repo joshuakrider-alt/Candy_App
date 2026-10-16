@@ -1,0 +1,4 @@
+# The old static site deploys the repo root. web/ is the Next.js app, which
+# deploys from its own Vercel project (Root Directory: web), so keep its
+# source out of the static site.
+/web
