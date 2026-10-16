@@ -290,6 +290,23 @@ merge), PR #22 (stock-reservation fix, draft — needs un-draft, rebase onto
 `main`, then merge), PR #10 (Sept 12 Cloud Agent dev environment, likely
 stale). Next.js build not started; no `web/` folder yet.
 
+## 2026-10-16 — Next.js Day 1 step 1: `web/` scaffold (Claude Code)
+
+First coding task of the migration plan. No API, env, Stripe, Render, Vercel or
+DNS change; the Vercel connect half waits for the second project.
+
+- `create-next-app@latest` installs Next.js 16.4.2, so per Joshua the app was
+  created with `create-next-app@15.5.28` and the same flags: Next 15.5.28,
+  React 19.1.0, Tailwind 4, ESLint, App Router, no `src/`, `@/*` alias.
+- Added `zustand`, `@tanstack/react-query` and dev `@playwright/test`.
+- Root `.vercelignore` excludes `/web` so the static site does not publish it.
+- Blocked: `shadcn init` / `shadcn add` need `ui.shadcn.com`, which this
+  environment's network policy refuses (403). `npx playwright install
+  chromium` was not run here; it only downloads a browser and adds no files.
+- `npm audit --omit=dev`: Next 15 bundles a postcss with high-severity
+  advisories; the only fix offered is Next 16.
+- Checked: `npm run lint`, `tsc --noEmit` and `npm run build` pass.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
