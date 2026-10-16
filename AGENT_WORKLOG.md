@@ -346,6 +346,12 @@ were not changed.
   are still unset. Auto-deploy did not pick up later `main` merges (backend
   code unchanged since `e3b16fa`).
 
+## 2026-10-16 — Migration plan copied into the repo (Claude Code)
+
+- `docs/NEXTJS_MIGRATION_PLAN.md`: verbatim Markdown export of the Claude Doc
+  plan (revision 34), with a separate Day 0 status note at the top taken from
+  the Oct 15 checkpoint. No code, env or service changes.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
