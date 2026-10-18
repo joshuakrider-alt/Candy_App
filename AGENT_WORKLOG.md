@@ -269,6 +269,50 @@ Frontend only; no API, environment, Stripe, Render or Vercel change.
   one link on 5 pages, buyers, signed-out visitors and a stale record without
   a token see none, no JavaScript errors.
 
+## 2026-10-03 — Test-mode staging API, part 1 (Claude Code)
+
+Day 0 task 3 of the Next.js migration plan. Production (Neon `production`
+branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
+
+### Done
+- Day 0 task 2 closed: Joshua confirmed `JWT_SECRET_KEY` is set on the
+  production API.
+- Neon project `CandyLadyApp`: new branch `staging` (`br-muddy-fire-ay664xbo`),
+  copied from `production` on 2026-10-03 (14 users, 2 sellers, 12 orders, none
+  open). The branch's `neondb_owner` password was reset, so the staging
+  connection string cannot open the production branch.
+- Render: new web service `Candy-Lady-api-staging` (`srv-db0h0ls9v7es73bdencg`),
+  free plan, Ohio, `main` with auto-deploy, build
+  `cd backend && pip install -r requirements.txt`, start
+  `cd backend && gunicorn app:app`, URL
+  `https://candy-lady-api-staging.onrender.com`.
+- Staging env set (values not logged): `DATABASE_URL` (staging branch),
+  `JWT_SECRET_KEY` (new, different from production), `PUBLIC_SITE_URL` =
+  `https://beta.neighborhoodcandylady.com`.
+- Staging data scrubbed (Joshua's go, after a Codex review on PR #21), on the
+  `staging` branch only: every user's name and email replaced with
+  `Staging user <id>` / `user<id>@staging.invalid`, every password hash
+  replaced with one for a discarded random password, photo keys cleared and
+  Stripe Identity state reset to `unstarted` (session id, verified time and
+  error code cleared); seller contact name/email replaced the same way and
+  Stripe Connect ids and readiness flags cleared, so real logins do not work on
+  staging and test-mode Connect onboarding starts fresh. Shops, items and
+  orders are kept. Checked afterwards: 0 real emails, 0 live Connect ids.
+
+### Still open (needs Joshua)
+- Stripe test mode: set `STRIPE_SECRET_KEY` (`sk_test_…`) and
+  `STRIPE_PUBLISHABLE_KEY` (`pk_test_…`) on the staging service; add a
+  test-mode webhook at `…/stripe/webhook` for `checkout.session.completed`,
+  `checkout.session.expired`, `charge.refunded` and put its secret in
+  `STRIPE_WEBHOOK_SECRET`. Until then staging has payments off.
+- Custom domain `api-staging.neighborhoodcandylady.com`: add it to the staging
+  service in Render, then add the CNAME Render shows in Vercel DNS.
+- `CORS_ORIGINS` left unset (defaults to `*`); Day 0 task 5 sets it.
+- No admin can log in to staging after the scrub: set `ADMIN_BOOTSTRAP_EMAIL`
+  and `ADMIN_BOOTSTRAP_PASSWORD` on the staging service (staging-only values),
+  redeploy, then remove them.
+- Copied paid orders still carry live Stripe payment ids; refunding them on
+  staging will fail in test mode.
 ## 2026-10-15 — Day 0 migration checklist checkpoint (Coda)
 
 The Next.js migration plan document referenced in earlier entries is not in
@@ -289,6 +333,24 @@ PR #23 (admin menu link, Oct 3). Still open: PR #21 (staging worklog, safe to
 merge), PR #22 (stock-reservation fix, draft — needs un-draft, rebase onto
 `main`, then merge), PR #10 (Sept 12 Cloud Agent dev environment, likely
 stale). Next.js build not started; no `web/` folder yet.
+## 2026-10-15 — Test-mode staging API, part 2 (Claude Code)
+
+Day 0 task 3, resumed after the Oct 5 pause. Production records and services
+were not changed.
+
+- Vercel DNS: added `api-staging` CNAME → `candy-lady-api-staging.onrender.com`
+  (TTL 60). Existing records untouched. Render still has to be told about the
+  domain (staging service → Settings → Custom Domains) before it serves on it.
+- Staging service checked on Render: still serving `e3b16fa`; no deploys or env
+  changes since Oct 3, so Stripe test keys, webhook secret and admin bootstrap
+  are still unset. Auto-deploy did not pick up later `main` merges (backend
+  code unchanged since `e3b16fa`).
+
+## 2026-10-16 — Migration plan copied into the repo (Claude Code)
+
+- `docs/NEXTJS_MIGRATION_PLAN.md`: verbatim Markdown export of the Claude Doc
+  plan (revision 34), with a separate Day 0 status note at the top taken from
+  the Oct 15 checkpoint. No code, env or service changes.
 
 ## 2026-10-16 — Next.js Day 1 step 1: `web/` scaffold (Claude Code)
 
