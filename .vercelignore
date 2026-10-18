@@ -1,0 +1,12 @@
+# The old static site deploys the repo root. web/ is the Next.js app, which
+# deploys from its own Vercel project (Root Directory: web), so keep its
+# source out of the static site.
+/web
+
+# Internal notes and the Flask API source. No page loads anything from these
+# paths, and without this Vercel serves them publicly (for example
+# /AGENT_WORKLOG.md and /backend/requirements.txt).
+/docs
+/backend
+/AGENT_WORKLOG.md
+/REVIEW_NOTES.md
