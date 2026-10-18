@@ -403,6 +403,18 @@ DNS change; the Vercel connect half waits for the second project.
   file wins over a rewrite. candy-beta reads `web/vercel.json` (none), not the
   root one, so it is unaffected. No Vercel or Render settings were changed.
 
+## 2026-10-18 — Public contact email switched to hello@ (Claude Code)
+
+- Every public page of the static site showed a personal Gmail address in the
+  footer and contact text. All 22 occurrences in 12 HTML files (`index`,
+  `about`, `faq`, `contact`, `privacy`, `terms`, `pickup`, `apply`, `seller`,
+  `buyer`, `admin`, and `shop.html`, which serves `/s/<slug>`) now use
+  `hello@neighborhoodcandylady.com`, including the `mailto:` links.
+- Checked with no change needed: `web/`, `backend/` (no outbound email,
+  error message or `/config` field carries a contact address), `app.js`,
+  `README.md`, `robots.txt`, `sitemap.xml`. Internal docs are not published
+  and were left alone. No Vercel or Render settings were changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
