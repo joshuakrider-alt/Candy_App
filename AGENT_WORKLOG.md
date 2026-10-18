@@ -390,6 +390,19 @@ DNS change; the Vercel connect half waits for the second project.
   Render staging service's environment (the app does not read them). Setting
   them redeployed staging.
 
+## 2026-10-18 — candy-beta build fix: keep web/ private without .vercelignore (Claude Code)
+
+- candy-beta (Root Directory `web`) failed with `NEXT_NO_VERSION`. Its build
+  log shows `Found .vercelignore (repository root)`: Vercel applies the
+  repo-root `.vercelignore` to every project on this repo, so `/web` stripped
+  `web/package.json`.
+- Removed `/web` from `.vercelignore`. The static site (candy-app) now keeps
+  `web/` private with two `redirects` in the root `vercel.json` (`/web` and
+  `/web/:path*` to `/`). Redirects run before Vercel serves a static file, so
+  no `web/` source is served; rewrites would not work, because a matching
+  file wins over a rewrite. candy-beta reads `web/vercel.json` (none), not the
+  root one, so it is unaffected. No Vercel or Render settings were changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
