@@ -369,6 +369,27 @@ DNS change; the Vercel connect half waits for the second project.
   advisories; the only fix offered is Next 16.
 - Checked: `npm run lint`, `tsc --noEmit` and `npm run build` pass.
 
+## 2026-10-18 — Day 1 step 1 finished: shadcn, `.vercelignore`, staging logins (Claude Code)
+
+- `ui.shadcn.com` allowed by Joshua. In `web/`: `npx shadcn@latest init`
+  (defaults: `base-nova` style, Base UI, neutral, CSS variables) and
+  `npx shadcn@latest add button card sheet dialog badge input tabs table sonner
+  skeleton dropdown-menu`. `npm run lint`, `tsc --noEmit` and `npm run build`
+  pass.
+- Root `.vercelignore` now also excludes `/docs`, `/backend`,
+  `/AGENT_WORKLOG.md` and `/REVIEW_NOTES.md`. Before this, the live static site
+  served them (checked: `/AGENT_WORKLOG.md` and `/backend/requirements.txt`
+  returned 200 on www). No HTML, JS, CSS, `vercel.json`, `robots.txt` or
+  `sitemap.xml` references those paths.
+- Staging only (Neon branch `staging`, never production), on Joshua's go:
+  buyer `user1@staging.invalid` (user 1, has 2 orders) got a new
+  staging-only password, and a seller login `seller1@staging.invalid` (user 16,
+  role seller) was added for the existing shop Ms. Kiki's Snack Spot (seller 1);
+  the copied data had no seller-role users. Passwords are stored only as
+  `STAGING_TEST_BUYER_PASSWORD` and `STAGING_TEST_SELLER_PASSWORD` on the
+  Render staging service's environment (the app does not read them). Setting
+  them redeployed staging.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
