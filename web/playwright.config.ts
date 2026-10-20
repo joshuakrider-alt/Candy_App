@@ -6,9 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const WEB_PORT = 3055;
 const API_PORT = 5055;
-const python = process.env.PYTHON ?? "python3";
-const db = process.env.E2E_DATABASE ?? "/tmp/candy-lady-e2e.db";
-
+// Must match tests/e2e/api-server.sh, which seeds these.
 export const E2E_PASSWORDS = {
   admin: "e2e-admin-password",
   seller: "e2e-seller-password",
@@ -35,18 +33,10 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `rm -f ${db} && ${python} manage.py seed-demo && ${python} -m flask --app app run --port ${API_PORT}`,
-      cwd: "../backend",
+      // Web CI starts this before `next build`, so it is reused there.
+      command: "sh tests/e2e/api-server.sh",
       url: `http://127.0.0.1:${API_PORT}/config`,
-      reuseExistingServer: !process.env.CI,
-      env: {
-        DATABASE_URL: `sqlite:///${db}`,
-        CORS_ORIGINS: `http://localhost:${WEB_PORT}`,
-        PUBLIC_SITE_URL: `http://localhost:${WEB_PORT}`,
-        SEED_ADMIN_PASSWORD: E2E_PASSWORDS.admin,
-        SEED_SELLER_PASSWORD: E2E_PASSWORDS.seller,
-        SEED_BUYER_PASSWORD: E2E_PASSWORDS.buyer,
-      },
+      reuseExistingServer: true,
     },
     {
       // A production build, so the cookie is the real __Host- one and the

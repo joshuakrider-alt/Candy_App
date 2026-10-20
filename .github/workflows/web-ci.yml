@@ -53,6 +53,17 @@ jobs:
       - name: Types
         run: npm run typecheck
 
+      # Started before the build, so the cached pages (/, /shops) are built
+      # with the seeded shops in them, as beta's are with staging's.
+      - name: Start the test API
+        run: |
+          sh tests/e2e/api-server.sh > "${RUNNER_TEMP}/api.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5055/config > /dev/null && exit 0; sleep 1; done
+          cat "${RUNNER_TEMP}/api.log"; exit 1
+        env:
+          PYTHON: python
+          E2E_DATABASE: ${{ runner.temp }}/candy-lady-e2e.db
+
       - name: Build
         run: npm run build
         env:
@@ -64,9 +75,6 @@ jobs:
 
       - name: Browser tests
         run: npm run test:e2e
-        env:
-          PYTHON: python
-          E2E_DATABASE: ${{ runner.temp }}/candy-lady-e2e.db
 
       - name: Keep the test report
         if: failure()
