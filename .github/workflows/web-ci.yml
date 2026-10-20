@@ -1,0 +1,77 @@
+name: Web CI
+
+on:
+  push:
+    branches: [main, staging]
+    paths: ["web/**", "backend/**", ".github/workflows/web-ci.yml"]
+  pull_request:
+    paths: ["web/**", "backend/**", ".github/workflows/web-ci.yml"]
+
+# Nothing here deploys or reaches staging or production: the end-to-end tests
+# run the Flask API locally on a throwaway SQLite database.
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Lint, types, build and browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Same Python as the API runs on Render, so the browser tests exercise
+      # the real Flask code paths.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install
+        run: |
+          npm ci
+          pip install -r ../backend/requirements.txt
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Types
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+        env:
+          FLASK_API_URL: http://127.0.0.1:5055
+          NEXT_PUBLIC_SITE_URL: http://localhost:3055
+
+      - name: Install the test browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: npm run test:e2e
+        env:
+          PYTHON: python
+          E2E_DATABASE: ${{ runner.temp }}/candy-lady-e2e.db
+
+      - name: Keep the test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          retention-days: 7

@@ -403,6 +403,28 @@ DNS change; the Vercel connect half waits for the second project.
   file wins over a rewrite. candy-beta reads `web/vercel.json` (none), not the
   root one, so it is unaffected. No Vercel or Render settings were changed.
 
+## 2026-10-20 — Next.js Day 1 finished: layout, sign-in, proxy, info pages (Claude Code)
+
+- Joshua's go (Oct 20): Days 1–5 of `docs/NEXTJS_MIGRATION_PLAN.md`, one PR
+  per day into `staging`, stop at cutover. PR #22 and the staging Render
+  branch are waiting on his decision and were not touched.
+- `web/` now has the brand tokens (nine colours, 18/24/32 px radii, shadow),
+  Baloo 2 and Nunito via `next/font`, the sticky header, footer and phone tab
+  bar, `lib/session.ts`, `/api/auth/login|signup|logout|session`, the
+  `/api/flask/[...path]` proxy, `middleware.ts`, `/login`, `/signup`,
+  `lib/types.ts` and the six information pages (contact email is hello@).
+- Added beyond the plan's code: `/api/auth/session` (answers "signed out"
+  without calling Flask when there is no cookie, so the header never wakes
+  Render), and the cookie is cleared with its full attributes, because
+  browsers ignore a `__Host-` cookie set without Secure and Path=/.
+- Codex plan question on CSP vs cached pages, default picked (Joshua can change it):
+  nonce policy only on `/account`, `/seller`, `/admin`, `/login`, `/signup`,
+  `/checkout`; cached public pages get a fixed policy with inline scripts
+  allowed. Lint bans `dangerouslySetInnerHTML`.
+- New `Web CI` workflow: lint, types, build, and Playwright tests against a
+  local Flask on SQLite seeded by `backend/seed.py` (36 tests, phone and
+  laptop). No Vercel or Render settings were changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

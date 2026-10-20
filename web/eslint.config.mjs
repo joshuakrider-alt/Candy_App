@@ -12,6 +12,13 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    rules: {
+      // React escapes all text; this is the one way around that, so it is
+      // banned outright (migration plan, "Attacks this design handles").
+      "react/no-danger": "error",
+    },
+  },
+  {
     ignores: [
       "node_modules/**",
       ".next/**",
