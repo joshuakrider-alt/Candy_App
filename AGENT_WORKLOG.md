@@ -461,6 +461,24 @@ DNS change; the Vercel connect half waits for the second project.
 - Browser tests now 64. A real Stripe test-card payment on beta is left for
   Joshua to try by hand. No Vercel or Render settings changed.
 
+## 2026-10-20 — Next.js Day 4: seller screens (Claude Code)
+
+- `/sell/apply` (application, then the new seller is signed in) and the seller
+  dashboard: `/seller` pickup queue (refreshes every 30 s), `/seller/inventory`
+  (stock toggles, own items in a dialog instead of `window.prompt`),
+  `/seller/storefront` (link, tagline, logo, colours, live preview),
+  `/seller/payouts` (Stripe Connect), `/seller/verify` (Stripe Identity) and
+  `/seller/photos` (canvas re-encode that drops GPS data, then a signed upload
+  straight to R2).
+- Stripe's `/seller.html?stripe=…` and `?identity=return` returns redirect to
+  the new pages with the query kept.
+- New optional env var on the web project: `UPLOAD_ORIGIN`, the origin of the
+  API's `STORAGE_ENDPOINT_URL`. It is added to connect-src; without it the
+  browser blocks photo uploads. Not set anywhere yet (needs Joshua).
+- PR #22 (stock reservations) is not folded in: it changes the API, and the
+  staging API deploys from `main`. Waiting on Joshua's answer.
+- Browser tests now 80. No Vercel or Render settings changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
