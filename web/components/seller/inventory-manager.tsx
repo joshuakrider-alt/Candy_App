@@ -14,8 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FormMessage, Panel } from "@/components/seller/panel";
-import { errorText, useSellerId, useSellerShop } from "@/components/seller/seller-shop";
+import { FormMessage, Panel } from "@/components/panel";
+import { errorText } from "@/lib/error-text";
+import { useSellerId, useSellerShop } from "@/components/seller/seller-shop";
 import { api } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { InventoryItem, StockStatus } from "@/lib/types";

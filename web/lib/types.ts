@@ -179,3 +179,21 @@ export type IdentityState = {
 
 /** connect_payload() in app.py; POST /sellers/<id>/stripe/connect adds the url. */
 export type ConnectState = SellerConnect & { seller_id: number; url?: string | null };
+
+/** GET /admin/photos: a SellerPhoto plus its shop's name. */
+export type ReviewPhoto = SellerPhoto & { shop_name: string | null };
+
+/** GET /admin/revenue */
+export type Revenue = {
+  paid_order_count: number;
+  gross_cents: number;
+  partially_refunded_cents: number;
+  platform_fee_cents: number;
+  seller_payout_cents: number;
+  connect_order_count: number;
+  connect_seller_payout_cents: number;
+  manual_order_count: number;
+  seller_payout_owed_cents: number;
+  platform_fee_percent: number;
+  platform_fee_flat_cents: number;
+};

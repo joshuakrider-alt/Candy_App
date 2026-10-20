@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FormMessage, Panel } from "@/components/seller/panel";
-import { errorText, usePublicConfig } from "@/components/seller/seller-shop";
+import { FormMessage, Panel } from "@/components/panel";
+import { errorText } from "@/lib/error-text";
+import { usePublicConfig } from "@/components/seller/seller-shop";
 import { api } from "@/lib/api";
 import type { IdentityState, IdentityStatus } from "@/lib/types";
 
