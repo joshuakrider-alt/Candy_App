@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { OrderItems } from "@/components/orders/order-summary";
-import { STEPS, canFinishPaying, orderStatusLine, stepIndex } from "@/components/orders/order-status";
+import { canFinishPaying, orderStatusLine, stepIndex, stepsFor } from "@/components/orders/order-status";
 import { PickupCode } from "@/components/orders/pickup-code";
 import type { Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,7 @@ export function OrderCard({
 
       {step !== null && step !== undefined && (
         <ol aria-label="Order progress" className="grid grid-cols-4 gap-1 text-center text-xs font-bold">
-          {STEPS.map((label, i) => (
+          {stepsFor(order).map((label, i) => (
             <li key={label} aria-current={i === step ? "step" : undefined}>
               <span className={cn("mb-1 block h-1.5 rounded-full", i <= step ? "bg-cherry-deep" : "bg-muted")} />
               <span className={i <= step ? "text-cola" : "text-muted-foreground"}>{label}</span>

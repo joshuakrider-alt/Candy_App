@@ -522,7 +522,9 @@ DNS change; the Vercel connect half waits for the second project.
 - Codex's third pass: buyers' orders show a partial refund and what was
   paid; if Flask prices an order differently from the saved cart, the new
   total is shown before Stripe opens.
-- Browser tests now 120. No Vercel or Render settings changed.
+- Orders from before online payment (`pay_at_pickup`) now read "Pay at
+  pickup" with an "Ordered" first step, not "Paid".
+- Browser tests now 122. No Vercel or Render settings changed.
 
 ## Logging rule
 

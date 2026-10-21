@@ -19,11 +19,18 @@ export function orderStatusLine(order: Pick<Order, "status" | "payment_status">)
     case "completed":
       return { label: "Picked up", tone: "done" as const };
     default:
-      return { label: "Paid", tone: "go" as const };
+      // Orders from before online payment are paid in person, not yet.
+      return order.payment_status === "pay_at_pickup"
+        ? { label: "Pay at pickup", tone: "go" as const }
+        : { label: "Paid", tone: "go" as const };
   }
 }
 
 export const STEPS = ["Paid", "Packing", "Ready", "Picked up"] as const;
+
+/** The four step labels; an order paid in person starts at "Ordered", not "Paid". */
+export const stepsFor = (order: Pick<Order, "payment_status">) =>
+  order.payment_status === "pay_at_pickup" ? (["Ordered", ...STEPS.slice(1)] as const) : STEPS;
 
 /** How far along the four steps a paid order is (0-3), or null if not paid. */
 export function stepIndex(order: Pick<Order, "status" | "payment_status">) {

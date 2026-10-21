@@ -275,6 +275,19 @@ test("a partly refunded order shows the refund and what was paid", async ({ page
   await expect(card.getByText("$3.00")).toBeVisible();
 });
 
+test("an order from before online payment says pay at pickup, not paid", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await page.route("**/api/flask/me/orders", (route) =>
+    route.fulfill({ json: [{ ...paidOrder, payment_status: "pay_at_pickup", pickup_code: null }] }),
+  );
+  await page.goto("/account/orders");
+  const card = page.locator("article").filter({ hasText: "Order #42" });
+  await expect(card.getByText("Pay at pickup")).toBeVisible();
+  await expect(card.getByText("Ordered")).toBeVisible();
+  await expect(card.getByText("Paid", { exact: true })).toHaveCount(0);
+});
+
 test("a new buyer sees no orders, can change their password, and can delete the account", async ({ page }) => {
   const email = `buyer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
   await page.goto("/signup");
