@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { House, Package, ShoppingBag, Store, UserRound } from "lucide-react";
+import { CartCount } from "@/components/cart/cart-button";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -38,7 +39,10 @@ export function TabBar() {
                 active(href) && "text-cherry-deep",
               )}
             >
-              <Icon aria-hidden className="size-5" />
+              <span className="relative">
+                <Icon aria-hidden className="size-5" />
+                {href === "/cart" && <CartCount />}
+              </span>
               {label}
             </Link>
           </li>

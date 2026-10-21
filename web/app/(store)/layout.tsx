@@ -1,3 +1,5 @@
+import { CartDrawer } from "@/components/cart/cart-drawer";
+import { SwitchShopDialog } from "@/components/cart/switch-shop-dialog";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { TabBar } from "@/components/tab-bar";
@@ -17,6 +19,8 @@ export default function StoreLayout({ children }: { children: React.ReactNode })
       </main>
       <SiteFooter />
       <TabBar />
+      <CartDrawer />
+      <SwitchShopDialog />
     </>
   );
 }

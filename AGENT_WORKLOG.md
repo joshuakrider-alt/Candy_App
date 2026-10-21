@@ -425,6 +425,25 @@ DNS change; the Vercel connect half waits for the second project.
   local Flask on SQLite seeded by `backend/seed.py` (36 tests, phone and
   laptop). No Vercel or Render settings were changed.
 
+## 2026-10-20 — Next.js Day 2: home, shops, shop pages, cart (Claude Code)
+
+- `/`, `/shops` and `/s/[slug]` are server-rendered from `GET /shops` and
+  `GET /shops/<slug>` (`lib/flask.ts`) and cached: `/` refreshes every 60 s,
+  the others every 30 s. An unreachable API at build time builds the page
+  empty instead of failing the deploy; after that a failed refresh keeps the
+  last good copy.
+- Cart: `store/cart.ts` (one shop per cart, never above stock), the drawer,
+  `/cart` and the "Start a new cart?" dialog. Checkout itself is Day 3.
+- Codex plan questions, defaults picked (Joshua can change them): seller logos
+  on other hosts render unresized and any https image is allowed; the old
+  `candyLadyCart`/`candyLadySellerId` keys are imported on first load and then
+  kept in sync with the new cart for the rollback window (remove with the old
+  site), while `candyLadyToken`, `candyLadyUser` and `candyLadyApiBase` are
+  deleted.
+- Found, not fixed (Flask, out of scope): `category_for_name` puts "Chocolate
+  Bar" under drinks, because "chocolate" contains "cola".
+- Browser tests now 50 (phone and laptop). No Vercel or Render settings changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
