@@ -81,6 +81,8 @@ export function ShopBrowser({ shops }: { shops: ShopSummary[] }) {
         </Chip>
       </div>
 
+      {/* Keeps the heading order h1 > h2 > h3 for the shop cards' h3s. */}
+      <h2 className="sr-only">Shops</h2>
       <p aria-live="polite" className="text-sm font-bold text-muted-foreground">
         {visible.length} shop{visible.length === 1 ? "" : "s"}
       </p>

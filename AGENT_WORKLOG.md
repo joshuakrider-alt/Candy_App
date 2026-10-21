@@ -444,6 +444,58 @@ DNS change; the Vercel connect half waits for the second project.
   Bar" under drinks, because "chocolate" contains "cola".
 - Browser tests now 50 (phone and laptop). No Vercel or Render settings changed.
 
+## 2026-10-20 — Next.js Day 3: checkout, Stripe return, buyer account (Claude Code)
+
+- Pay button (`components/cart/checkout-button.tsx`) posts the cart to Flask's
+  `POST /orders` through the proxy and sends the buyer to Stripe. Signed-out
+  buyers go to `/login?next=` and come back to the same shop. Flask's refusals
+  (shop not set up for cards, cards off on this API, sold out, under $0.50)
+  show as plain sentences in the cart.
+- Stripe still returns to the old URLs Flask builds (`/buyer.html?order=` and
+  `/s/<slug>?order=`); `next.config.ts` redirects both to `/checkout/return`,
+  which confirms the payment, clears the cart when paid, offers "finish paying"
+  or "release my snacks" when cancelled, and hands Android app buyers back to
+  `candylady://checkout-return`.
+- `/account` (change password, delete account, sign out) and `/account/orders`
+  (last 25 orders with pickup codes).
+- Browser tests now 64. A real Stripe test-card payment on beta is left for
+  Joshua to try by hand. No Vercel or Render settings changed.
+
+## 2026-10-20 — Next.js Day 4: seller screens (Claude Code)
+
+- `/sell/apply` (application, then the new seller is signed in) and the seller
+  dashboard: `/seller` pickup queue (refreshes every 30 s), `/seller/inventory`
+  (stock toggles, own items in a dialog instead of `window.prompt`),
+  `/seller/storefront` (link, tagline, logo, colours, live preview),
+  `/seller/payouts` (Stripe Connect), `/seller/verify` (Stripe Identity) and
+  `/seller/photos` (canvas re-encode that drops GPS data, then a signed upload
+  straight to R2).
+- Stripe's `/seller.html?stripe=…` and `?identity=return` returns redirect to
+  the new pages with the query kept.
+- New optional env var on the web project: `UPLOAD_ORIGIN`, the origin of the
+  API's `STORAGE_ENDPOINT_URL`. It is added to connect-src; without it the
+  browser blocks photo uploads. Not set anywhere yet (needs Joshua).
+- PR #22 (stock reservations) is not folded in: it changes the API, and the
+  staging API deploys from `main`. Waiting on Joshua's answer.
+- Browser tests now 80. No Vercel or Render settings changed.
+
+## 2026-10-20 — Next.js Day 5: admin, search engines, old addresses (Claude Code)
+
+- Admin screens: `/admin` (approve or reject applications), `/admin/revenue`
+  (totals, latest 200 orders, refund with a confirm step), `/admin/catalog`
+  (category balance) and `/admin/photos` (photo review).
+- `app/sitemap.ts` lists every approved shop; `app/robots.ts` and a `noindex`
+  tag keep search engines out unless `NEXT_PUBLIC_SITE_URL` is the real
+  domain, so beta is never indexed. At cutover that variable must become
+  `https://neighborhoodcandylady.com`. A generated link-preview image.
+- Every old `.html` address redirects permanently (308) to its new page.
+- Lighthouse (mobile, local build with the production site URL): `/`,
+  `/shops` and a shop page score 93+ performance, 100 accessibility, best
+  practices and SEO.
+- Browser tests now 100. Not done here: the manual pass on iPhone Safari and
+  Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
+- No Vercel or Render settings changed. Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

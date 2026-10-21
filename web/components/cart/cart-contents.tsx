@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { ShoppingBag } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState } from "react";
+import { CheckoutButton } from "@/components/cart/checkout-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QtyStepper } from "@/components/cart/qty-stepper";
 import { money } from "@/lib/format";
@@ -12,6 +13,7 @@ import { cartTotal, useCart, useCartReady } from "@/store/cart";
 export function CartContents({ onNavigate }: { onNavigate?: () => void }) {
   const ready = useCartReady((s) => s.ready);
   const { lines, shopName, shopSlug, setQty } = useCart();
+  const [error, setError] = useState<string | null>(null);
 
   if (!ready) {
     return (
@@ -66,10 +68,12 @@ export function CartContents({ onNavigate }: { onNavigate?: () => void }) {
         <span className="font-bold">Subtotal</span>
         <span className="font-extrabold tabular-nums">{money(total)}</span>
       </div>
-      {/* Checkout is wired to Flask's POST /orders on Day 3. */}
-      <Button disabled className="h-12 rounded-full text-base font-extrabold">
-        Pay {money(total)} &amp; reserve
-      </Button>
+      {error && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-bold text-destructive">
+          {error}
+        </p>
+      )}
+      <CheckoutButton onError={setError} />
       <p className="text-center text-sm text-muted-foreground">
         Pay by card, then pick up at the shop with your code. No delivery.
       </p>

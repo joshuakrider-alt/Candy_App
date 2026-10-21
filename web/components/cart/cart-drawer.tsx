@@ -1,5 +1,7 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { CartContents } from "@/components/cart/cart-contents";
 import { useCartDrawer } from "@/store/cart";
@@ -7,6 +9,9 @@ import { useCartDrawer } from "@/store/cart";
 /** The slide-out cart, opened by Add and by the header's cart button. */
 export function CartDrawer() {
   const { open, setOpen } = useCartDrawer();
+  const pathname = usePathname();
+  // Leaving the page (to sign in, to a shop) closes the drawer.
+  useEffect(() => setOpen(false), [pathname, setOpen]);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
