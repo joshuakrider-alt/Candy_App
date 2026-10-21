@@ -155,3 +155,27 @@ export type Me = {
 
 /** Every Flask error body: {"error": "..."} */
 export type ApiError = { error: string };
+
+/** One row of GET /sellers/<id>/orders: an Order plus who is picking it up. */
+export type SellerOrder = Order & { buyer_name: string };
+
+/** GET /config: non-secret settings. Only the fields the site reads. */
+export type PublicConfig = {
+  platform_fee_percent?: number;
+  platform_fee_flat_cents?: number;
+  uploads_enabled: boolean;
+  max_upload_bytes: number;
+  identity_enabled: boolean;
+};
+
+/** identity_payload() in app.py; POST /identity/session adds the Stripe url. */
+export type IdentityState = {
+  identity_status: IdentityStatus;
+  identity_verified: boolean;
+  identity_error: string | null;
+  identity_verified_at: string | null;
+  url?: string | null;
+};
+
+/** connect_payload() in app.py; POST /sellers/<id>/stripe/connect adds the url. */
+export type ConnectState = SellerConnect & { seller_id: number; url?: string | null };

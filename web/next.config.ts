@@ -20,6 +20,10 @@ const nextConfig: NextConfig = {
         destination: "/checkout/return?shop=:slug",
         permanent: false,
       },
+      // Stripe Connect onboarding (?stripe=return|refresh) and Stripe
+      // Identity (?identity=return) send sellers back to the old seller page.
+      { source: "/seller.html", has: [{ type: "query", key: "stripe" }], destination: "/seller/payouts", permanent: false },
+      { source: "/seller.html", has: [{ type: "query", key: "identity" }], destination: "/seller/verify", permanent: false },
     ];
   },
   images: {
