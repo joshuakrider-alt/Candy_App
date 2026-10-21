@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="The Candy Lady candy icon">
+  <rect width="64" height="64" rx="16" fill="#ff4f87"/>
+  <path d="m17 24-9-5 3 11-3 11 9-5v-12Zm30 0 9-5-3 11 3 11-9-5V24Z" fill="#ffe3a3"/>
+  <rect x="15" y="18" width="34" height="24" rx="12" fill="#fff7ed"/>
+  <path d="M25 22c-5 4-5 12 0 16M39 22c5 4 5 12 0 16" fill="none" stroke="#ffb02e" stroke-width="4" stroke-linecap="round"/>
+</svg>
