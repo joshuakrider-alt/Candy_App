@@ -18,6 +18,19 @@ export function OrderItems({ order }: { order: Order }) {
         <span>Total</span>
         <span className="tabular-nums">{money(order.total_cents)}</span>
       </p>
+      {/* Flask keeps a partly refunded order "paid" and records the amount here. */}
+      {order.refunded_cents > 0 && (
+        <>
+          <p className="flex justify-between text-sm">
+            <span>Refunded</span>
+            <span className="tabular-nums">−{money(order.refunded_cents)}</span>
+          </p>
+          <p className="flex justify-between font-extrabold">
+            <span>You paid</span>
+            <span className="tabular-nums">{money(order.total_cents - order.refunded_cents)}</span>
+          </p>
+        </>
+      )}
     </div>
   );
 }

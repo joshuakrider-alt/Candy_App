@@ -91,7 +91,10 @@ test("flow 4 and 7: Pay goes to Stripe from the shop page, and the return shows 
   await page.route("**/api/flask/orders", async (route) => {
     sent = route.request().postDataJSON();
     // Flask's success_url for a shop-page checkout, standing in for Stripe.
-    await route.fulfill({ status: 201, json: { ...paidOrder, payment_status: "pending", pickup_code: null, checkout_url: `${KIKI}?order=42&session_id=cs_test_1` } });
+    await route.fulfill({
+      status: 201,
+      json: { ...paidOrder, total_cents: 250, payment_status: "pending", pickup_code: null, checkout_url: `${KIKI}?order=42&session_id=cs_test_1` },
+    });
   });
   await page.route("**/api/flask/orders/42/payment/confirm", (route) => route.fulfill({ json: paidOrder }));
 
@@ -134,6 +137,25 @@ test("a confirmed payment leaves a newer cart from another shop alone", async ({
   await page.goto(`/checkout/return?shop=ms-kikis-snack-spot&order=42&session_id=cs_test_1`);
   await expect(page.getByText("CL-AB2CD")).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cl-cart")!).state.sellerId)).toBe(2);
+});
+
+test("a price that changed since the cart was saved is shown before Stripe opens", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await addToCart(page, "Sour Gummy Mix");
+  await page.route("**/api/flask/orders", (route) =>
+    route.fulfill({
+      status: 201,
+      json: { ...paidOrder, total_cents: 300, payment_status: "pending", pickup_code: null, checkout_url: `${KIKI}?order=42&session_id=cs_test_1` },
+    }),
+  );
+  const cart = page.getByRole("dialog", { name: "Your cart" });
+  await cart.getByRole("button", { name: "Pay $2.50 & reserve" }).click();
+  await expect(cart.getByText("Prices changed since you added these. Your total is now $3.00.")).toBeVisible();
+  await expect(page).toHaveURL(KIKI);
+  await page.route("**/api/flask/orders/42/payment/confirm", (route) => route.fulfill({ json: paidOrder }));
+  await cart.getByRole("button", { name: "Pay $3.00 & reserve" }).click();
+  await page.waitForURL("**/checkout/return?**");
 });
 
 test("flow 5: cancelled at Stripe offers Finish paying (retried once) and Release items", async ({ page }) => {
@@ -240,6 +262,17 @@ test("back from Stripe when the sign-in check fails says so instead of handing o
   await page.goto("/checkout/return?order=42&session_id=cs_test_1");
   await expect(page.getByText("Could not check that you're signed in. Reload this page to see your order.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Taking you back to the app…" })).toHaveCount(0);
+});
+
+test("a partly refunded order shows the refund and what was paid", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await page.route("**/api/flask/me/orders", (route) => route.fulfill({ json: [{ ...paidOrder, refunded_cents: 200 }] }));
+  await page.goto("/account/orders");
+  const card = page.locator("article").filter({ hasText: "Order #42" });
+  await expect(card.getByText("−$2.00")).toBeVisible();
+  await expect(card.getByText("You paid")).toBeVisible();
+  await expect(card.getByText("$3.00")).toBeVisible();
 });
 
 test("a new buyer sees no orders, can change their password, and can delete the account", async ({ page }) => {

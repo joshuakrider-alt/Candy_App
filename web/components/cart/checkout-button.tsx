@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ApiRequestError, api } from "@/lib/api";
 import { money } from "@/lib/format";
@@ -34,7 +34,12 @@ export function CheckoutButton({ onError }: { onError: (message: string | null) 
   const session = useSession();
   const { sellerId, lines } = useCart();
   const [busy, setBusy] = useState(false);
+  // Flask prices the order from the current shelf; if that differs from the
+  // cart (a price changed since it was saved), the buyer sees the new total first.
+  const [repriced, setRepriced] = useState<{ total: number; url: string } | null>(null);
   const total = cartTotal(lines);
+  // A changed cart is a different order, so Pay starts over.
+  useEffect(() => setRepriced(null), [lines]);
 
   async function pay() {
     onError(null);
@@ -51,6 +56,12 @@ export function CheckoutButton({ onError }: { onError: (message: string | null) 
         return_to: pathname.startsWith("/s/") ? "shop" : "marketplace",
       });
       if (!order.checkout_url) throw new ApiRequestError("Stripe did not open a checkout page. Try again.", 502);
+      if (order.total_cents !== total) {
+        setRepriced({ total: order.total_cents, url: order.checkout_url });
+        onError(`Prices changed since you added these. Your total is now ${money(order.total_cents)}.`);
+        setBusy(false);
+        return;
+      }
       window.location.assign(order.checkout_url);
     } catch (error) {
       if (error instanceof ApiRequestError && error.status === 401) {
@@ -60,6 +71,14 @@ export function CheckoutButton({ onError }: { onError: (message: string | null) 
       onError(checkoutMessage(error));
       setBusy(false);
     }
+  }
+
+  if (repriced) {
+    return (
+      <Button onClick={() => window.location.assign(repriced.url)} className="h-12 rounded-full text-base font-extrabold">
+        Pay {money(repriced.total)} &amp; reserve
+      </Button>
+    );
   }
 
   // Flask's POST /orders takes buyer and admin accounts only.

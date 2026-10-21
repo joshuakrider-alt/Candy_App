@@ -519,7 +519,10 @@ DNS change; the Vercel connect half waits for the second project.
   error instead of the Android app handoff; an order action after the
   session ran out goes to sign in; sellers are warned that deleting their
   login can take the shop off the site.
-- Browser tests now 116. No Vercel or Render settings changed.
+- Codex's third pass: buyers' orders show a partial refund and what was
+  paid; if Flask prices an order differently from the saved cart, the new
+  total is shown before Stripe opens.
+- Browser tests now 120. No Vercel or Render settings changed.
 
 ## Logging rule
 
