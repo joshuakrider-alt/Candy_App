@@ -496,6 +496,20 @@ DNS change; the Vercel connect half waits for the second project.
   Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
 - No Vercel or Render settings changed. Cutover not started.
 
+## 2026-10-21 — Days 2 to 5 into staging, and Codex findings on PR #33 (Claude Code)
+
+- #29 to #32 merged into each other's branches, not `staging`, so PR #33
+  brings Days 2 to 5 into `staging` as one merge.
+- Fixed: signing in or out now drops every cached query, not only the
+  session, so a second person on the same tab never sees the first buyer's
+  orders and pickup codes (reproduced in a browser test first).
+- `web/README.md` lists the web project's env vars, including
+  `UPLOAD_ORIGIN`, which photo uploads need whenever the API has storage on.
+- Not fixed here: seller profile photos have no review queue (the old admin
+  page never had one either). Needs a new API list endpoint; raised with
+  Joshua.
+- Browser tests now 102. No Vercel or Render settings changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

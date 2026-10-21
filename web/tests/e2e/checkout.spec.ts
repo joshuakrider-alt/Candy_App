@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { sessionCookie, signIn } from "./fixtures";
+import { ACCOUNTS, sessionCookie, signIn } from "./fixtures";
 
 // Testing and acceptance flows 4, 5, 7 and 8 as far as they can run without
 // Stripe. The seeded shops have no Stripe account, so the real API refuses
@@ -161,6 +161,32 @@ test("/account/orders shows the status line, pickup code and Finish paying", asy
   const pending = page.locator("article").filter({ hasText: "Order #41" });
   await expect(pending.getByText("Waiting for payment")).toBeVisible();
   await expect(pending.getByRole("button", { name: "Finish paying" })).toBeVisible();
+});
+
+test("after signing out, the next person to sign in never sees the last buyer's orders", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  let calls = 0;
+  await page.route("**/api/flask/me/orders", (route) => {
+    calls += 1;
+    // The second person's orders never arrive, so anything on screen is left over.
+    if (calls === 1) return route.fulfill({ json: [{ ...paidOrder, status: "ready" }] });
+  });
+  await page.goto("/account/orders");
+  await expect(page.getByText("CL-AB2CD")).toBeVisible();
+
+  await page.getByRole("button", { name: "Alice" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.waitForURL("**/login");
+  await page.getByLabel("Email").fill(ACCOUNTS.seller.email);
+  await page.getByLabel("Password").fill(ACCOUNTS.seller.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Jordan" }).click();
+  await page.getByRole("menuitem", { name: "Your orders" }).click();
+  await page.waitForURL("**/account/orders");
+  await expect(page.getByRole("heading", { name: "Your orders" })).toBeVisible();
+  await expect(page.getByText("CL-AB2CD")).toHaveCount(0);
+  await expect.poll(() => calls).toBe(2);
 });
 
 test("a new buyer sees no orders, can change their password, and can delete the account", async ({ page }) => {

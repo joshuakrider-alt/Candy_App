@@ -20,6 +20,17 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Environment variables
+
+Set on the Vercel project. None of them is a secret.
+
+| Name | What it is | Without it |
+| :--- | :--- | :--- |
+| `FLASK_API_URL` | The Flask API, e.g. `https://api-staging.neighborhoodcandylady.com` | Nothing loads |
+| `NEXT_PUBLIC_SITE_URL` | This site's own address, used for links, the sitemap and share cards | Search engines are told not to index it |
+| `NEXT_PUBLIC_IMAGE_HOST` | Host of the API's `STORAGE_PUBLIC_BASE_URL` | Seller photos are shown without resizing |
+| `UPLOAD_ORIGIN` | Origin of the API's `STORAGE_ENDPOINT_URL`, e.g. `https://<account>.r2.cloudflarestorage.com` | Photo uploads are blocked by the Content Security Policy whenever the API has storage switched on |
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
