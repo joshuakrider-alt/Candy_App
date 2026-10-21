@@ -444,6 +444,23 @@ DNS change; the Vercel connect half waits for the second project.
   Bar" under drinks, because "chocolate" contains "cola".
 - Browser tests now 50 (phone and laptop). No Vercel or Render settings changed.
 
+## 2026-10-20 — Next.js Day 3: checkout, Stripe return, buyer account (Claude Code)
+
+- Pay button (`components/cart/checkout-button.tsx`) posts the cart to Flask's
+  `POST /orders` through the proxy and sends the buyer to Stripe. Signed-out
+  buyers go to `/login?next=` and come back to the same shop. Flask's refusals
+  (shop not set up for cards, cards off on this API, sold out, under $0.50)
+  show as plain sentences in the cart.
+- Stripe still returns to the old URLs Flask builds (`/buyer.html?order=` and
+  `/s/<slug>?order=`); `next.config.ts` redirects both to `/checkout/return`,
+  which confirms the payment, clears the cart when paid, offers "finish paying"
+  or "release my snacks" when cancelled, and hands Android app buyers back to
+  `candylady://checkout-return`.
+- `/account` (change password, delete account, sign out) and `/account/orders`
+  (last 25 orders with pickup codes).
+- Browser tests now 64. A real Stripe test-card payment on beta is left for
+  Joshua to try by hand. No Vercel or Render settings changed.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
