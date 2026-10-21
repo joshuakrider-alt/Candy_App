@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Panel } from "@/components/seller/panel";
-import { SellerNav } from "@/components/seller/seller-nav";
+import { DashboardNav } from "@/components/dashboard-nav";
+import { Panel } from "@/components/panel";
 import { SellerShopProvider } from "@/components/seller/seller-shop";
 import { getSession } from "@/lib/session";
 
@@ -62,7 +62,7 @@ export default async function SellerLayout({ children }: { children: React.React
           </p>
         )}
         <div className="grid gap-6 md:grid-cols-[13rem_1fr]">
-          <SellerNav />
+          <DashboardNav area="seller" />
           <div className="flex min-w-0 flex-col gap-5">{children}</div>
         </div>
       </div>

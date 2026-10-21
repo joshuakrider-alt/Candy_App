@@ -140,6 +140,8 @@ export function ShopView({ storefront }: { storefront: Storefront }) {
         </div>
       </div>
 
+      {/* Keeps the heading order h1 > h2 > h3 for the product cards' h3s. */}
+      <h2 className="sr-only">On the shelf</h2>
       {visible.length ? (
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {visible.map((item) => (

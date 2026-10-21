@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/** The card every seller screen is built from, matching the account pages. */
+/** The card the seller and admin screens are built from, matching the account pages. */
 export function Panel({
   title,
   description,

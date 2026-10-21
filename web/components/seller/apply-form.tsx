@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FormMessage, Panel } from "@/components/seller/panel";
-import { errorText } from "@/components/seller/seller-shop";
+import { FormMessage, Panel } from "@/components/panel";
+import { errorText } from "@/lib/error-text";
 import { api, auth } from "@/lib/api";
 import { useRefreshSession } from "@/lib/use-session";
 

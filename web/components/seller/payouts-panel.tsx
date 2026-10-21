@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FormMessage, Panel } from "@/components/seller/panel";
-import { errorText, useSellerId, useSellerShop } from "@/components/seller/seller-shop";
+import { FormMessage, Panel } from "@/components/panel";
+import { errorText } from "@/lib/error-text";
+import { useSellerId, useSellerShop } from "@/components/seller/seller-shop";
 import { api } from "@/lib/api";
 import type { ConnectState, SellerConnect } from "@/lib/types";
 

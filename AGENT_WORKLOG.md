@@ -479,6 +479,23 @@ DNS change; the Vercel connect half waits for the second project.
   staging API deploys from `main`. Waiting on Joshua's answer.
 - Browser tests now 80. No Vercel or Render settings changed.
 
+## 2026-10-20 — Next.js Day 5: admin, search engines, old addresses (Claude Code)
+
+- Admin screens: `/admin` (approve or reject applications), `/admin/revenue`
+  (totals, latest 200 orders, refund with a confirm step), `/admin/catalog`
+  (category balance) and `/admin/photos` (photo review).
+- `app/sitemap.ts` lists every approved shop; `app/robots.ts` and a `noindex`
+  tag keep search engines out unless `NEXT_PUBLIC_SITE_URL` is the real
+  domain, so beta is never indexed. At cutover that variable must become
+  `https://neighborhoodcandylady.com`. A generated link-preview image.
+- Every old `.html` address redirects permanently (308) to its new page.
+- Lighthouse (mobile, local build with the production site URL): `/`,
+  `/shops` and a shop page score 93+ performance, 100 accessibility, best
+  practices and SEO.
+- Browser tests now 100. Not done here: the manual pass on iPhone Safari and
+  Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
+- No Vercel or Render settings changed. Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
