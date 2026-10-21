@@ -236,3 +236,8 @@ test("flow 10: a snack photo is re-encoded, uploaded straight to storage and con
   expect(uploaded!.body!.includes("Exif")).toBe(false);
   expect(confirmed).toMatchObject({ key: "candy_photo/2026/10/3-abc.jpg", content_type: "image/jpeg", caption: "Our shelf", candy_id: null });
 });
+
+test("a seller's account page warns what deleting the login does to the shop", async ({ page }) => {
+  await signIn(page, "seller", "/account");
+  await expect(page.getByText("If you're the only login for your shop, it comes off the site")).toBeVisible();
+});

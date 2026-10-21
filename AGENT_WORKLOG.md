@@ -515,7 +515,11 @@ DNS change; the Vercel connect half waits for the second project.
   refuses.
 - Not done: showing the approved seller face on the shop page (the old site
   never showed it either); it waits on the profile-photo review decision.
-- Browser tests now 110. No Vercel or Render settings changed.
+- Codex's second pass: back from Stripe, a failed sign-in check now shows an
+  error instead of the Android app handoff; an order action after the
+  session ran out goes to sign in; sellers are warned that deleting their
+  login can take the shop off the site.
+- Browser tests now 116. No Vercel or Render settings changed.
 
 ## Logging rule
 

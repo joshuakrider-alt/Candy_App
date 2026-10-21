@@ -113,6 +113,13 @@ export function AccountSettings({ user }: { user: User }) {
               Removes your account for good. Unpaid orders are cancelled and their items go back on the shelf. Paid orders
               stay on the shop&apos;s records without your name.
             </p>
+            {user.role === "seller" && (
+              // accounts.delete_account puts the shop back to pending when this is its last login.
+              <p className="mt-2 text-sm font-bold text-destructive">
+                If you&apos;re the only login for your shop, it comes off the site until an admin gives it a new owner, and
+                you lose its pickup queue. Hand over any paid orders first.
+              </p>
+            )}
             <Button variant="destructive" onClick={() => setDeleting(true)} className="mt-4 rounded-full font-extrabold">
               Delete my account
             </Button>

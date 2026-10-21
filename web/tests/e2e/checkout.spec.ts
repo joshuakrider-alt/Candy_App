@@ -217,6 +217,31 @@ test("after signing out, the next person to sign in never sees the last buyer's 
   await expect.poll(() => calls).toBe(2);
 });
 
+test("an order action after the session ran out goes to sign in", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await page.route("**/api/flask/me/orders", (route) =>
+    route.fulfill({ json: [{ ...paidOrder, id: 41, payment_status: "pending", pickup_code: null }] }),
+  );
+  await page.route("**/api/flask/orders/41/checkout", async (route) => {
+    // What the proxy does on Flask's 401: the cookie goes too.
+    await page.context().clearCookies();
+    await route.fulfill({ status: 401, json: { error: "authentication required" } });
+  });
+  await page.goto("/account/orders");
+  await page.getByRole("button", { name: "Finish paying" }).click();
+  await expect(page).toHaveURL(`/login?next=${encodeURIComponent("/account/orders")}`);
+});
+
+test("back from Stripe when the sign-in check fails says so instead of handing off to the app", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await page.route("**/api/auth/session", (route) => route.fulfill({ status: 503, json: { error: "unavailable" } }));
+  await page.goto("/checkout/return?order=42&session_id=cs_test_1");
+  await expect(page.getByText("Could not check that you're signed in. Reload this page to see your order.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Taking you back to the app…" })).toHaveCount(0);
+});
+
 test("a new buyer sees no orders, can change their password, and can delete the account", async ({ page }) => {
   const email = `buyer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
   await page.goto("/signup");

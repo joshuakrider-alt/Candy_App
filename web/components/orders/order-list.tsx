@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -10,10 +11,13 @@ import { OrderCard } from "@/components/orders/order-card";
 import { finishPaying, releaseItems, sentence } from "@/components/orders/use-order-actions";
 import { ApiRequestError, api } from "@/lib/api";
 import type { Order } from "@/lib/types";
+import { useRefreshSession } from "@/lib/use-session";
 
 /** Your orders, from GET /me/orders; refreshed every 30 s so "Ready" shows up. */
 export function OrderList() {
   const client = useQueryClient();
+  const router = useRouter();
+  const refreshSession = useRefreshSession();
   const [busyId, setBusyId] = useState<number | null>(null);
   const orders = useQuery({
     queryKey: ["me", "orders"],
@@ -27,6 +31,13 @@ export function OrderList() {
       await action();
       await client.invalidateQueries({ queryKey: ["me", "orders"] });
     } catch (error) {
+      // The session ran out while this page was open (the proxy has already
+      // cleared the cookie): sign in again and come back here.
+      if (error instanceof ApiRequestError && error.status === 401) {
+        await refreshSession();
+        router.push(`/login?next=${encodeURIComponent("/account/orders")}`);
+        return;
+      }
       toast.error(error instanceof ApiRequestError ? sentence(error.message) : "Something went wrong. Try again.");
     } finally {
       setBusyId(null);

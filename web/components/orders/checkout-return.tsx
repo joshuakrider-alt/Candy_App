@@ -44,6 +44,13 @@ export function CheckoutReturn({ params }: { params: Params }) {
       return;
     }
 
+    // Not knowing who is signed in is not the same as nobody being signed in:
+    // without this a web buyer could be sent to the app instead of their code.
+    if (session.isError) {
+      setView({ kind: "error", message: "Could not check that you're signed in. Reload this page to see your order." });
+      return;
+    }
+
     // The Android app pays in a Chrome Custom Tab that has no website session.
     // A web buyer is always signed in by the time Stripe sends them back, so
     // "back from Stripe with nobody signed in" means the app's tab. Hand off to
@@ -80,7 +87,7 @@ export function CheckoutReturn({ params }: { params: Params }) {
       .catch((error) =>
         setView({ kind: "error", message: error instanceof ApiRequestError ? sentence(error.message) : "Could not confirm the payment." }),
       );
-  }, [session.isPending, session.data, orderId, params.payment, returnedFromStripe]);
+  }, [session.isPending, session.isError, session.data, orderId, params.payment, returnedFromStripe]);
 
   async function onFinishPaying() {
     setBusy(true);
