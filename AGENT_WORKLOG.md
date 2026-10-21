@@ -508,7 +508,14 @@ DNS change; the Vercel connect half waits for the second project.
 - Not fixed here: seller profile photos have no review queue (the old admin
   page never had one either). Needs a new API list endpoint; raised with
   Joshua.
-- Browser tests now 102. No Vercel or Render settings changed.
+- Also from Codex: the refund dialog shows only what is left on a partly
+  refunded order; seller accounts see why they can't pay instead of a 403;
+  a confirmed payment takes only its own items out of the cart; admins see
+  that another admin removes their account instead of a delete that Flask
+  refuses.
+- Not done: showing the approved seller face on the shop page (the old site
+  never showed it either); it waits on the profile-photo review decision.
+- Browser tests now 110. No Vercel or Render settings changed.
 
 ## Logging rule
 

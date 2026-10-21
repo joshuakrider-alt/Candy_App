@@ -32,6 +32,8 @@ type Cart = {
   /** Applies fresh stock counts from a shop page: lowers or drops lines that no longer fit. */
   syncStock: (shop: CartShop, counts: Map<number, number>) => void;
   clear: () => void;
+  /** Takes a paid order's items out of the cart, leaving anything added since (or another shop's cart) alone. */
+  removePaid: (order: { seller_id: number; items: { candy_id: number; quantity: number }[] }) => void;
 };
 
 const empty = { sellerId: null, shopName: null, shopSlug: null, lines: [] as Line[] };
@@ -70,6 +72,14 @@ export const useCart = create<Cart>()(
         set(lines.length ? { lines, shopName: shop.name, shopSlug: shop.slug } : empty);
       },
       clear: () => set(empty),
+      removePaid: (order) => {
+        if (get().sellerId !== order.seller_id) return;
+        const paid = new Map(order.items.map((item) => [item.candy_id, item.quantity]));
+        const lines = get()
+          .lines.map((l) => ({ ...l, qty: l.qty - (paid.get(l.candyId) ?? 0) }))
+          .filter((l) => l.qty > 0);
+        set(lines.length ? { lines } : empty);
+      },
     }),
     {
       name: "cl-cart",

@@ -149,7 +149,7 @@ export function RevenuePanel() {
           <DialogHeader>
             <DialogTitle className="font-heading text-2xl text-cola">Refund order #{refunding?.id}?</DialogTitle>
             <DialogDescription>
-              The buyer gets {refunding ? money(refunding.total_cents) : ""} back on their card and the order leaves{" "}
+              The buyer gets {refunding ? money(refunding.total_cents - refunding.refunded_cents) : ""} back on their card and the order leaves{" "}
               {refunding?.seller?.shop_name ?? "the shop"}&apos;s pickup queue. Stripe takes the shop&apos;s share back.
               This can&apos;t be undone.
             </DialogDescription>
@@ -159,7 +159,7 @@ export function RevenuePanel() {
               Go back
             </Button>
             <Button variant="destructive" onClick={refund} disabled={busy} className="rounded-full font-extrabold">
-              Refund {refunding ? money(refunding.total_cents) : ""}
+              Refund {refunding ? money(refunding.total_cents - refunding.refunded_cents) : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

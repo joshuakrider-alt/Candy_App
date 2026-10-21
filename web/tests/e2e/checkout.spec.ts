@@ -108,6 +108,34 @@ test("flow 4 and 7: Pay goes to Stripe from the shop page, and the return shows 
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cl-cart")!).state.lines)).toEqual([]);
 });
 
+test("a seller account is told to use a buyer account instead of paying", async ({ page }) => {
+  await signIn(page, "seller");
+  await page.waitForURL("**/seller");
+  await addToCart(page, "Sour Gummy Mix");
+  const cart = page.getByRole("dialog", { name: "Your cart" });
+  await expect(cart.getByRole("button", { name: "Pay $2.50 & reserve" })).toBeDisabled();
+  await expect(cart.getByText("Seller accounts can't place orders. Sign in with a buyer account to buy.")).toBeVisible();
+});
+
+test("a confirmed payment leaves a newer cart from another shop alone", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  const other = {
+    state: {
+      sellerId: 2,
+      shopName: "Another Shop",
+      shopSlug: "another-shop",
+      lines: [{ candyId: 9, name: "Hot Chips", priceCents: 200, max: 5, qty: 1 }],
+    },
+    version: 1,
+  };
+  await page.evaluate((cart) => localStorage.setItem("cl-cart", JSON.stringify(cart)), other);
+  await page.route("**/api/flask/orders/42/payment/confirm", (route) => route.fulfill({ json: paidOrder }));
+  await page.goto(`/checkout/return?shop=ms-kikis-snack-spot&order=42&session_id=cs_test_1`);
+  await expect(page.getByText("CL-AB2CD")).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cl-cart")!).state.sellerId)).toBe(2);
+});
+
 test("flow 5: cancelled at Stripe offers Finish paying (retried once) and Release items", async ({ page }) => {
   await signIn(page, "buyer");
   await page.waitForURL("**/shops");

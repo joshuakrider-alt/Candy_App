@@ -96,6 +96,40 @@ test("flow 11: an admin refunds a paid order after confirming", async ({ page })
   await expect(row.getByRole("button", { name: "Refund" })).toHaveCount(0);
 });
 
+test("a partly refunded order offers only what is left", async ({ page }) => {
+  const order = {
+    id: 56,
+    user_id: 4,
+    seller_id: 1,
+    status: "new",
+    total_cents: 450,
+    refunded_cents: 150,
+    platform_fee_refunded_cents: 15,
+    payment_status: "paid",
+    platform_fee_cents: 45,
+    seller_payout_cents: 405,
+    currency: "usd",
+    payout_method: "connect",
+    paid_at: "2026-10-20T12:00:00",
+    created_at: "2026-10-20T11:58:00",
+    pickup_code: null,
+    items: [],
+    seller: { id: 1, shop_name: "Ms. Kiki's Snack Spot" },
+  };
+  await page.route("**/api/flask/orders", (route) => route.fulfill({ json: [order] }));
+  await signIn(page, "admin", "/admin/revenue");
+  await page.getByRole("row", { name: "Order #56" }).getByRole("button", { name: "Refund" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("The buyer gets $3.00 back");
+  await expect(dialog.getByRole("button", { name: "Refund $3.00" })).toBeVisible();
+});
+
+test("an admin's account page explains that another admin removes it", async ({ page }) => {
+  await signIn(page, "admin", "/account");
+  await expect(page.getByText("Admin accounts can't be deleted here. Ask another admin to remove this account.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete my account" })).toHaveCount(0);
+});
+
 test("the catalog shows its category balance", async ({ page }) => {
   await signIn(page, "admin", "/admin/catalog");
   const balance = page.getByLabel("Category balance");

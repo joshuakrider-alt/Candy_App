@@ -62,6 +62,18 @@ export function CheckoutButton({ onError }: { onError: (message: string | null) 
     }
   }
 
+  // Flask's POST /orders takes buyer and admin accounts only.
+  if (session.data?.user?.role === "seller") {
+    return (
+      <>
+        <Button disabled className="h-12 rounded-full text-base font-extrabold">
+          Pay {money(total)} &amp; reserve
+        </Button>
+        <p className="text-sm text-muted-foreground">Seller accounts can&apos;t place orders. Sign in with a buyer account to buy.</p>
+      </>
+    );
+  }
+
   return (
     <Button onClick={pay} disabled={busy || !lines.length} className="h-12 rounded-full text-base font-extrabold">
       {busy ? "Opening secure checkout…" : session.data?.user ? `Pay ${money(total)} & reserve` : "Sign in to pay"}

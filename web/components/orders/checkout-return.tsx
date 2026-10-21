@@ -71,7 +71,7 @@ export function CheckoutReturn({ params }: { params: Params }) {
       .post<Order>(`/orders/${orderId}/payment/confirm`)
       .then((order) => {
         if (order.payment_status === "paid") {
-          useCart.getState().clear();
+          useCart.getState().removePaid(order);
           setView({ kind: "paid", order });
         } else {
           setView({ kind: "not-paid", order });
@@ -87,7 +87,7 @@ export function CheckoutReturn({ params }: { params: Params }) {
     try {
       const order = await finishPaying(orderId, returnTo);
       if (order?.payment_status === "paid") {
-        useCart.getState().clear();
+        useCart.getState().removePaid(order);
         setView({ kind: "paid", order });
       }
     } catch (error) {

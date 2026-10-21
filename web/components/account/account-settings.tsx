@@ -104,13 +104,20 @@ export function AccountSettings({ user }: { user: User }) {
 
       <section className="rounded-lg border border-destructive/30 bg-paper/95 p-5 shadow-candy">
         <h2 className="font-heading text-2xl font-bold text-cola">Delete account</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Removes your account for good. Unpaid orders are cancelled and their items go back on the shelf. Paid orders stay
-          on the shop&apos;s records without your name.
-        </p>
-        <Button variant="destructive" onClick={() => setDeleting(true)} className="mt-4 rounded-full font-extrabold">
-          Delete my account
-        </Button>
+        {user.role === "admin" ? (
+          // Flask refuses (accounts.assert_self_deletable) so the platform is never left without an admin.
+          <p className="mt-1 text-sm text-muted-foreground">Admin accounts can&apos;t be deleted here. Ask another admin to remove this account.</p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Removes your account for good. Unpaid orders are cancelled and their items go back on the shelf. Paid orders
+              stay on the shop&apos;s records without your name.
+            </p>
+            <Button variant="destructive" onClick={() => setDeleting(true)} className="mt-4 rounded-full font-extrabold">
+              Delete my account
+            </Button>
+          </>
+        )}
       </section>
 
       <Dialog open={deleting} onOpenChange={(open) => !busy && setDeleting(open)}>
