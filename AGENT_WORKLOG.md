@@ -496,6 +496,20 @@ DNS change; the Vercel connect half waits for the second project.
   Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
 - No Vercel or Render settings changed. Cutover not started.
 
+## 2026-10-22 — Beta: approved shops show on /shops straight away (Claude Code)
+
+- Joshua approved Beta Test Snacks on beta and it was missing from `/shops`
+  while `/s/beta-test-snacks` loaded. Neon staging had it approved with a
+  slug, so Flask was right; `/shops` and `/` are cached for 30 to 60 seconds
+  and the first visit after a change gets the old copy (a cold Render API
+  can keep it longer).
+- New server action `web/app/actions/refresh-shops.ts` drops the cached `/`,
+  `/shops`, shop pages and sitemap after an admin approves or rejects a shop
+  and after a seller saves their shop page, items or stock.
+- The admin browser test now loads `/shops` before approving and expects the
+  shop right after; without the fix it fails the same way beta did.
+- No Vercel or Render settings changed. Cutover not started.
+
 ## 2026-10-22 — Connect accounts created through Accounts v2 (Claude Code)
 
 - Joshua turned on "Accounts v1 support" in the Stripe sandbox because the
