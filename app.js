@@ -1440,7 +1440,7 @@ if (sellerApp) {
                   order.stock_shortfall
                     ? `<p class="order-message">Short ${order.stock_shortfall} item${
                         order.stock_shortfall === 1 ? "" : "s"
-                      }: this payment came in after the checkout timed out and the stock was sold again. Check your shelf, and ask the admin for a refund if you cannot fill it.</p>`
+                      }: there were not enough left for this order when its payment came in. Check your shelf. If you cannot fill it, ask the admin for a refund, then update your shelf count so anything left goes back on sale.</p>`
                     : ""
                 }
                 <p>${escapeHtml(order.buyer_name || "Buyer")} · ${paidLabel} · you keep ${formatCents(

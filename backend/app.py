@@ -458,14 +458,36 @@ def register_routes(app):
         )
         return {candy_id: int(total or 0) for candy_id, total in rows}
 
-    def seller_inventory_payload(seller_id, rows):
+    def reserved_count_column():
+        """reserved_counts for each SellerInventory row, as a column.
+
+        Selected in the same statement as the row, so the sellable count and
+        the held count come from one snapshot: a checkout committing between
+        two separate reads could otherwise show a shelf count that never was.
+        """
+        return (
+            db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
+            .join(Order, OrderItem.order_id == Order.id)
+            .filter(
+                Order.seller_id == SellerInventory.seller_id,
+                OrderItem.candy_id == SellerInventory.candy_id,
+                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
+                Order.inventory_released_at.is_(None),
+            )
+            .correlate(SellerInventory)
+            .scalar_subquery()
+        )
+
+    def seller_inventory_payload(seller_id, rows, reserved=None):
         """Inventory rows for the seller's own dashboard.
 
         Adds reserved_count (held by open checkouts) and on_hand_count (what
         should be on the shelf: for sale plus held), so a seller who counts the
-        shelf can type that number back as on_hand_count.
+        shelf can type that number back as on_hand_count. Without `reserved`
+        the held counts are read here, so call it with the rows locked.
         """
-        reserved = reserved_counts(seller_id, [row.candy_id for row in rows])
+        if reserved is None:
+            reserved = reserved_counts(seller_id, [row.candy_id for row in rows])
         payload = []
         for row in rows:
             data = row.to_dict()
@@ -1650,8 +1672,11 @@ def register_routes(app):
             inventory.status = values["status"]
             if inventory.status == "out-of-stock":
                 inventory.inventory_count = 0
+        # Built before the commit releases the row lock, so the held count
+        # matches the row.
+        payload = seller_inventory_payload(seller_id, [inventory])[0]
         db.session.commit()
-        return jsonify(seller_inventory_payload(seller_id, [inventory])[0])
+        return jsonify(payload)
 
     @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["DELETE"])
     @require_roles("seller", "admin")
@@ -1675,14 +1700,17 @@ def register_routes(app):
         assert_seller_access(current_user(), seller_id)
         Seller.query.get_or_404(seller_id)
         ensure_seller_inventory_rows(seller_id)
-        inventory = (
-            SellerInventory.query.filter_by(seller_id=seller_id)
-            .join(Candy)
+        results = (
+            db.session.query(SellerInventory, reserved_count_column())
+            .filter(SellerInventory.seller_id == seller_id)
+            .join(Candy, SellerInventory.candy_id == Candy.id)
             .filter(Candy.is_active.is_(True))
             .order_by(Candy.name)
             .all()
         )
-        return jsonify(seller_inventory_payload(seller_id, inventory))
+        inventory = [row for row, _ in results]
+        reserved = {row.candy_id: int(held or 0) for row, held in results}
+        return jsonify(seller_inventory_payload(seller_id, inventory, reserved))
 
     @app.route("/sellers/<int:seller_id>/inventory/<int:candy_id>", methods=["PUT"])
     @require_roles("seller", "admin")
@@ -1724,8 +1752,11 @@ def register_routes(app):
             inventory.inventory_count = 0
             inventory.status = "out-of-stock"
 
+        # Built before the commit releases the row lock, so the held count
+        # matches the row.
+        payload = seller_inventory_payload(seller_id, [inventory])[0]
         db.session.commit()
-        return jsonify(seller_inventory_payload(seller_id, [inventory])[0])
+        return jsonify(payload)
 
     @app.route("/sellers/<int:seller_id>/orders", methods=["GET"])
     @require_roles("seller", "admin")

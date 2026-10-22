@@ -1090,3 +1090,31 @@ def test_a_late_payment_with_stock_still_on_the_shelf_is_not_flagged(
     paid = buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()
     assert paid["stock_shortfall"] == 0
     assert inventory_count(client, seller_id, candy_id) == 2
+
+
+def test_a_recount_after_refunding_a_short_order_puts_its_units_back_on_sale(
+    app, client, buyer, admin, kiki_seller, fake_stripe, stub_refunds
+):
+    """A late order took the 2 units left and is 1 short; the shop refunds it.
+
+    Refunds never return stock on their own, so the seller's shelf count is
+    what brings the 2 untouched units back.
+    """
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 3})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    late_session = fake_stripe.last_session_id
+    let_the_sweep_release(app, client, order["id"])
+    other = place_order(buyer, seller_id, candy_id, quantity=1).get_json()
+    fake_stripe.mark_paid(late_session)
+    assert buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()["stock_shortfall"] == 1
+
+    assert admin.post(f"/admin/orders/{order['id']}/refund").get_json()["payment_status"] == "refunded"
+    # Still on the shelf: the 2 the refunded order took, plus 1 held by the open checkout.
+    row = kiki_seller.put(url, json={"on_hand_count": 3}).get_json()
+
+    assert row["reserved_count"] == 1
+    assert row["inventory_count"] == 2
+    assert other["payment_status"] == "pending"
