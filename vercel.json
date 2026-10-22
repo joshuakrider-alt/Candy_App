@@ -29,5 +29,17 @@
       "source": "/s/:slug",
       "destination": "/shop.html"
     }
+  ],
+  "redirects": [
+    {
+      "source": "/web",
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/web/:path*",
+      "destination": "/",
+      "permanent": false
+    }
   ]
 }

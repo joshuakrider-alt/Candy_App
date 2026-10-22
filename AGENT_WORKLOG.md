@@ -254,7 +254,170 @@ no API, environment variable, Stripe, Render or Vercel setting was changed.
 - Live only after this PR is merged and Vercel deploys `main`.
 - `JWT_SECRET_KEY` confirmed set on Render by Joshua (Day 0 task 2).
 
-## 2026-10-03 — Seller stock edits during open checkouts
+## 2026-10-03 — Admin link in the site menu (Claude Code)
+
+Frontend only; no API, environment, Stripe, Render or Vercel change.
+
+- No page linked to `/admin.html`, so an admin could not find where to approve
+  seller applications. A signed-in admin now gets an "Admin" link in the top
+  menu of every page, before "Log out" where a page has one.
+- Shown only when a session token is stored and the stored user's role is
+  `admin`; it appears on sign-in and disappears on sign-out without a reload,
+  including from another tab. This is a convenience, not access control: the
+  dashboard and every admin API route still check the role on the server.
+- Verified in headless Chromium against intercepted API responses: admin sees
+  one link on 5 pages, buyers, signed-out visitors and a stale record without
+  a token see none, no JavaScript errors.
+
+## 2026-10-03 — Test-mode staging API, part 1 (Claude Code)
+
+Day 0 task 3 of the Next.js migration plan. Production (Neon `production`
+branch, Render `Candy-Lady-api`, live Stripe, DNS) was not changed.
+
+### Done
+- Day 0 task 2 closed: Joshua confirmed `JWT_SECRET_KEY` is set on the
+  production API.
+- Neon project `CandyLadyApp`: new branch `staging` (`br-muddy-fire-ay664xbo`),
+  copied from `production` on 2026-10-03 (14 users, 2 sellers, 12 orders, none
+  open). The branch's `neondb_owner` password was reset, so the staging
+  connection string cannot open the production branch.
+- Render: new web service `Candy-Lady-api-staging` (`srv-db0h0ls9v7es73bdencg`),
+  free plan, Ohio, `main` with auto-deploy, build
+  `cd backend && pip install -r requirements.txt`, start
+  `cd backend && gunicorn app:app`, URL
+  `https://candy-lady-api-staging.onrender.com`.
+- Staging env set (values not logged): `DATABASE_URL` (staging branch),
+  `JWT_SECRET_KEY` (new, different from production), `PUBLIC_SITE_URL` =
+  `https://beta.neighborhoodcandylady.com`.
+- Staging data scrubbed (Joshua's go, after a Codex review on PR #21), on the
+  `staging` branch only: every user's name and email replaced with
+  `Staging user <id>` / `user<id>@staging.invalid`, every password hash
+  replaced with one for a discarded random password, photo keys cleared and
+  Stripe Identity state reset to `unstarted` (session id, verified time and
+  error code cleared); seller contact name/email replaced the same way and
+  Stripe Connect ids and readiness flags cleared, so real logins do not work on
+  staging and test-mode Connect onboarding starts fresh. Shops, items and
+  orders are kept. Checked afterwards: 0 real emails, 0 live Connect ids.
+
+### Still open (needs Joshua)
+- Stripe test mode: set `STRIPE_SECRET_KEY` (`sk_test_…`) and
+  `STRIPE_PUBLISHABLE_KEY` (`pk_test_…`) on the staging service; add a
+  test-mode webhook at `…/stripe/webhook` for `checkout.session.completed`,
+  `checkout.session.expired`, `charge.refunded` and put its secret in
+  `STRIPE_WEBHOOK_SECRET`. Until then staging has payments off.
+- Custom domain `api-staging.neighborhoodcandylady.com`: add it to the staging
+  service in Render, then add the CNAME Render shows in Vercel DNS.
+- `CORS_ORIGINS` left unset (defaults to `*`); Day 0 task 5 sets it.
+- No admin can log in to staging after the scrub: set `ADMIN_BOOTSTRAP_EMAIL`
+  and `ADMIN_BOOTSTRAP_PASSWORD` on the staging service (staging-only values),
+  redeploy, then remove them.
+- Copied paid orders still carry live Stripe payment ids; refunding them on
+  staging will fail in test mode.
+## 2026-10-15 — Day 0 migration checklist checkpoint (Coda)
+
+The Next.js migration plan document referenced in earlier entries is not in
+the repo (checked `main`, both `park/` branches, and GitHub issues), so the
+verified Day 0 status is recorded here.
+
+| Task | Status |
+| --- | --- |
+| 1. Close the `?api=` hole | Done — PR #20 merged Oct 3 |
+| 2. Confirm `JWT_SECRET_KEY` on Render | Done — confirmed by Joshua Oct 3 |
+| 3. Test-mode staging API | Half done — Neon staging DB branch + Render staging service (`candy-lady-api-staging.onrender.com`) live, PII scrubbed (worklog entry in open PR #21). Still needed: Stripe test keys + test-mode webhook on the staging service, `api-staging.neighborhoodcandylady.com` DNS, one-time admin bootstrap |
+| 4. Second Vercel project on Pro | Not started — no record in repo or worklog |
+| 5. Add new site addresses to `CORS_ORIGINS` | Not done — staging still allows every origin |
+| 6. Cloudflare R2 photo storage | Not started — no record in repo or worklog |
+
+Shipped since the plan was written: PR #19 (order/payment correctness, Oct 2),
+PR #23 (admin menu link, Oct 3). Still open: PR #21 (staging worklog, safe to
+merge), PR #22 (stock-reservation fix, draft — needs un-draft, rebase onto
+`main`, then merge), PR #10 (Sept 12 Cloud Agent dev environment, likely
+stale). Next.js build not started; no `web/` folder yet.
+## 2026-10-15 — Test-mode staging API, part 2 (Claude Code)
+
+Day 0 task 3, resumed after the Oct 5 pause. Production records and services
+were not changed.
+
+- Vercel DNS: added `api-staging` CNAME → `candy-lady-api-staging.onrender.com`
+  (TTL 60). Existing records untouched. Render still has to be told about the
+  domain (staging service → Settings → Custom Domains) before it serves on it.
+- Staging service checked on Render: still serving `e3b16fa`; no deploys or env
+  changes since Oct 3, so Stripe test keys, webhook secret and admin bootstrap
+  are still unset. Auto-deploy did not pick up later `main` merges (backend
+  code unchanged since `e3b16fa`).
+
+## 2026-10-16 — Migration plan copied into the repo (Claude Code)
+
+- `docs/NEXTJS_MIGRATION_PLAN.md`: verbatim Markdown export of the Claude Doc
+  plan (revision 34), with a separate Day 0 status note at the top taken from
+  the Oct 15 checkpoint. No code, env or service changes.
+
+## 2026-10-16 — Next.js Day 1 step 1: `web/` scaffold (Claude Code)
+
+First coding task of the migration plan. No API, env, Stripe, Render, Vercel or
+DNS change; the Vercel connect half waits for the second project.
+
+- `create-next-app@latest` installs Next.js 16.4.2, so per Joshua the app was
+  created with `create-next-app@15.5.28` and the same flags: Next 15.5.28,
+  React 19.1.0, Tailwind 4, ESLint, App Router, no `src/`, `@/*` alias.
+- Added `zustand`, `@tanstack/react-query` and dev `@playwright/test`.
+- Root `.vercelignore` excludes `/web` so the static site does not publish it.
+- Blocked: `shadcn init` / `shadcn add` need `ui.shadcn.com`, which this
+  environment's network policy refuses (403). `npx playwright install
+  chromium` was not run here; it only downloads a browser and adds no files.
+- `npm audit --omit=dev`: Next 15 bundles a postcss with high-severity
+  advisories; the only fix offered is Next 16.
+- Checked: `npm run lint`, `tsc --noEmit` and `npm run build` pass.
+
+## 2026-10-18 — Day 1 step 1 finished: shadcn, `.vercelignore`, staging logins (Claude Code)
+
+- `ui.shadcn.com` allowed by Joshua. In `web/`: `npx shadcn@latest init`
+  (defaults: `base-nova` style, Base UI, neutral, CSS variables) and
+  `npx shadcn@latest add button card sheet dialog badge input tabs table sonner
+  skeleton dropdown-menu`. `npm run lint`, `tsc --noEmit` and `npm run build`
+  pass.
+- Root `.vercelignore` now also excludes `/docs`, `/backend`,
+  `/AGENT_WORKLOG.md` and `/REVIEW_NOTES.md`. Before this, the live static site
+  served them (checked: `/AGENT_WORKLOG.md` and `/backend/requirements.txt`
+  returned 200 on www). No HTML, JS, CSS, `vercel.json`, `robots.txt` or
+  `sitemap.xml` references those paths.
+- Staging only (Neon branch `staging`, never production), on Joshua's go:
+  buyer `user1@staging.invalid` (user 1, has 2 orders) got a new
+  staging-only password, and a seller login `seller1@staging.invalid` (user 16,
+  role seller) was added for the existing shop Ms. Kiki's Snack Spot (seller 1);
+  the copied data had no seller-role users. Passwords are stored only as
+  `STAGING_TEST_BUYER_PASSWORD` and `STAGING_TEST_SELLER_PASSWORD` on the
+  Render staging service's environment (the app does not read them). Setting
+  them redeployed staging.
+
+## 2026-10-18 — candy-beta build fix: keep web/ private without .vercelignore (Claude Code)
+
+- candy-beta (Root Directory `web`) failed with `NEXT_NO_VERSION`. Its build
+  log shows `Found .vercelignore (repository root)`: Vercel applies the
+  repo-root `.vercelignore` to every project on this repo, so `/web` stripped
+  `web/package.json`.
+- Removed `/web` from `.vercelignore`. The static site (candy-app) now keeps
+  `web/` private with two `redirects` in the root `vercel.json` (`/web` and
+  `/web/:path*` to `/`). Redirects run before Vercel serves a static file, so
+  no `web/` source is served; rewrites would not work, because a matching
+  file wins over a rewrite. candy-beta reads `web/vercel.json` (none), not the
+  root one, so it is unaffected. No Vercel or Render settings were changed.
+
+## 2026-10-18 — Public contact email switched to hello@ (Claude Code)
+
+- Every public page of the static site showed a personal Gmail address in the
+  footer and contact text. All 22 occurrences in 12 HTML files (`index`,
+  `about`, `faq`, `contact`, `privacy`, `terms`, `pickup`, `apply`, `seller`,
+  `buyer`, `admin`, and `shop.html`, which serves `/s/<slug>`) now use
+  `hello@neighborhoodcandylady.com`, including the `mailto:` links.
+- Checked with no change needed: `web/`, `backend/` (no outbound email,
+  error message or `/config` field carries a contact address), `app.js`,
+  `README.md`, `robots.txt`, `sitemap.xml`. Internal docs are not published
+  and were left alone. No Vercel or Render settings were changed.
+
+## 2026-10-22 — Seller stock edits during open checkouts (Claude Code, PR #22)
+
+- Written 2026-10-03, paused 10-05, resumed 10-22.
 
 - Seller stock saves set an absolute count with no row lock, so a save could
   overwrite a reservation that was committing, and a shelf count typed while

@@ -1,0 +1,12 @@
+# Vercel applies this file from the repository root to every project built
+# from this repo, including candy-beta (Root Directory: web). So web/ must not
+# be listed here, or candy-beta's build loses web/package.json. The static
+# site keeps web/ private with redirects in vercel.json instead.
+
+# Internal notes and the Flask API source. No page loads anything from these
+# paths, and without this Vercel serves them publicly (for example
+# /AGENT_WORKLOG.md and /backend/requirements.txt).
+/docs
+/backend
+/AGENT_WORKLOG.md
+/REVIEW_NOTES.md
