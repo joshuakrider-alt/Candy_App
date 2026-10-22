@@ -175,7 +175,8 @@ test("held stock: the shelf count includes open checkouts, and a short order say
   await count.fill("12");
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(sent).toEqual([{ on_hand_count: 12, inventory_count: 12 }]);
+  // An API from before on_hand_count reads inventory_count: the 9 for sale.
+  expect(sent).toEqual([{ on_hand_count: 12, reserved_count: 3, inventory_count: 9 }]);
 });
 
 test("the shop page form previews as you type and saves", async ({ page }) => {

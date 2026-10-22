@@ -1378,6 +1378,7 @@ if (sellerApp) {
               data-stock-status="${item.status}"
               data-inventory-count="${item.inventory_count}"
               data-on-hand-count="${item.on_hand_count ?? item.inventory_count}"
+              data-reserved-count="${item.reserved_count || 0}"
             >
               <div>
                 <p class="card-label">${owned ? "Your item" : "From platform catalog"}</p>
@@ -1530,8 +1531,9 @@ if (sellerApp) {
               description,
               price_cents: priceCents,
               on_hand_count: Number(stock),
-              // Read only by an API from before on_hand_count.
-              inventory_count: Number(stock),
+              reserved_count: Number(card.dataset.reservedCount) || 0,
+              // Read only by an API from before on_hand_count: the count for sale.
+              inventory_count: Math.max(0, Number(stock) - (Number(card.dataset.reservedCount) || 0)),
             },
           });
         }
@@ -1549,7 +1551,10 @@ if (sellerApp) {
     const body = currentlyOut
       ? {
           status: "in-stock",
-          on_hand_count: Math.max(8, Number(card.dataset.onHandCount) || 0),
+          // At least 8 for sale, on top of any units held by open checkouts.
+          on_hand_count:
+            Math.max(8, Number(card.dataset.inventoryCount) || 0) + (Number(card.dataset.reservedCount) || 0),
+          reserved_count: Number(card.dataset.reservedCount) || 0,
           // Read only by an API from before on_hand_count.
           inventory_count: Math.max(8, Number(card.dataset.inventoryCount) || 0),
         }

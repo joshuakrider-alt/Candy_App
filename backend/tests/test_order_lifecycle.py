@@ -893,16 +893,50 @@ def test_resaving_the_shelf_count_does_not_wipe_a_reservation(client, buyer, kik
     assert inventory_count(client, seller_id, candy_id) == 7
 
 
-def test_a_shelf_count_below_the_held_units_leaves_nothing_for_sale(client, buyer, kiki_seller, fake_stripe):
+def test_a_shelf_count_below_the_held_units_is_refused(client, buyer, kiki_seller, fake_stripe):
+    """Clamping 2 to 0 would forget a unit; a release would then put 3 on sale."""
     seller_id = kiki_seller.user["seller_id"]
     candy_id = first_in_stock_item(client, seller_id)["candy_id"]
     url = f"/sellers/{seller_id}/inventory/{candy_id}"
     kiki_seller.put(url, json={"on_hand_count": 10})
     place_order(buyer, seller_id, candy_id, quantity=3)
 
-    row = kiki_seller.put(url, json={"on_hand_count": 2}).get_json()
+    response = kiki_seller.put(url, json={"on_hand_count": 2})
+    assert response.status_code == 400
+    assert "at least 3" in response.get_json()["error"]
+    assert inventory_count(client, seller_id, candy_id) == 7
+    # Exactly the held units is fine: nothing left for sale.
+    row = kiki_seller.put(url, json={"on_hand_count": 3}).get_json()
     assert row["inventory_count"] == 0
     assert row["status"] == "out-of-stock"
+
+
+def test_a_count_from_before_a_held_checkout_was_paid_is_refused(client, buyer, kiki_seller, fake_stripe):
+    """The dialog showed 13 with 3 held; the buyer paid before the seller saved."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    seen = seller_row(kiki_seller, seller_id, candy_id)
+    assert seen["reserved_count"] == 3
+
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+    assert buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()["payment_status"] == "paid"
+
+    stale = kiki_seller.put(
+        url, json={"on_hand_count": seen["on_hand_count"], "reserved_count": seen["reserved_count"]}
+    )
+    assert stale.status_code == 409
+    assert "0 now held" in stale.get_json()["error"]
+    assert inventory_count(client, seller_id, candy_id) == 7
+
+    fresh = seller_row(kiki_seller, seller_id, candy_id)
+    saved = kiki_seller.put(
+        url, json={"on_hand_count": fresh["on_hand_count"], "reserved_count": fresh["reserved_count"]}
+    )
+    assert saved.status_code == 200
+    assert saved.get_json()["inventory_count"] == 7
 
 
 def test_on_hand_count_wins_over_the_legacy_field(client, buyer, kiki_seller, fake_stripe):

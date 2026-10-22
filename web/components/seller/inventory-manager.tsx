@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { FormMessage, Panel } from "@/components/panel";
 import { errorText } from "@/lib/error-text";
 import { useSellerId, useSellerShop } from "@/components/seller/seller-shop";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { InventoryItem, StockStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -60,9 +60,16 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       return;
     }
     // The count is what is on the shelf. Flask takes the units held by open
-    // checkouts back off on_hand_count; inventory_count is only read by an API
-    // from before on_hand_count. A new item has nothing held yet.
-    let body: Record<string, unknown> = { on_hand_count: count, inventory_count: count };
+    // checkouts back off on_hand_count, and answers 409 if the held units
+    // are no longer the ones shown here. inventory_count, the count for sale,
+    // is only read by an API from before on_hand_count. A new item has
+    // nothing held yet.
+    const held = item?.reserved_count ?? 0;
+    if (count < held) {
+      setError(`${held} are held in open checkouts, so count at least ${held}.`);
+      return;
+    }
+    let body: Record<string, unknown> = { on_hand_count: count, reserved_count: held, inventory_count: count - held };
     if (editing.mode !== "count") {
       const priceCents = toCents(String(data.get("price") ?? ""));
       if (priceCents === null) {
@@ -86,7 +93,12 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       onSaved();
       onClose();
     } catch (e) {
-      setError(errorText(e));
+      if (e instanceof ApiRequestError && e.status === 409) {
+        // Held units changed while the dialog was open: start again from the new counts.
+        toast.error(errorText(e));
+        onSaved();
+        onClose();
+      } else setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -216,7 +228,13 @@ export function InventoryManager() {
     const out = item.status === "out-of-stock";
     // Same rule as the old page: back in stock starts at no fewer than 8.
     const body = out
-      ? { status: "in-stock", on_hand_count: Math.max(8, onHand(item)), inventory_count: Math.max(8, item.inventory_count) }
+      ? {
+          status: "in-stock",
+          // At least 8 for sale, on top of any units held by open checkouts.
+          on_hand_count: Math.max(8, item.inventory_count) + (item.reserved_count ?? 0),
+          reserved_count: item.reserved_count ?? 0,
+          inventory_count: Math.max(8, item.inventory_count),
+        }
       : { status: "out-of-stock" };
     setBusy(item.candy_id);
     try {
@@ -224,6 +242,7 @@ export function InventoryManager() {
       await reload();
     } catch (e) {
       toast.error(errorText(e));
+      await reload();
     } finally {
       setBusy(null);
     }

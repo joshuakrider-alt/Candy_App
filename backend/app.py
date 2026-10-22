@@ -439,12 +439,38 @@ def register_routes(app):
         should be on the shelf: for sale plus held), so a seller who counts the
         shelf can type that number back as on_hand_count.
         """
-        reserved = reserved_counts(seller_id, [row.candy_id for row in rows])
+        # The count and the held units are read in one statement, so a
+        # checkout committing in between cannot make on_hand_count add a
+        # reservation to a count it was not yet taken from (or the reverse).
+        held = (
+            db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
+            .join(Order, OrderItem.order_id == Order.id)
+            .filter(
+                Order.seller_id == seller_id,
+                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
+                Order.inventory_released_at.is_(None),
+                OrderItem.candy_id == SellerInventory.candy_id,
+            )
+            .correlate(SellerInventory)
+            .scalar_subquery()
+        )
+        candy_ids = [row.candy_id for row in rows]
+        snapshot = {
+            candy_id: (count or 0, int(reserved or 0))
+            for candy_id, count, reserved in db.session.query(
+                SellerInventory.candy_id, SellerInventory.inventory_count, held
+            ).filter(
+                SellerInventory.seller_id == seller_id,
+                SellerInventory.candy_id.in_(candy_ids),
+            )
+        } if candy_ids else {}
         payload = []
         for row in rows:
             data = row.to_dict()
-            data["reserved_count"] = reserved.get(row.candy_id, 0)
-            data["on_hand_count"] = (row.inventory_count or 0) + data["reserved_count"]
+            count, reserved = snapshot.get(row.candy_id, (row.inventory_count or 0, 0))
+            data["inventory_count"] = count
+            data["reserved_count"] = reserved
+            data["on_hand_count"] = count + reserved
             payload.append(data)
         return payload
 
@@ -466,12 +492,35 @@ def register_routes(app):
         means the sellable count itself, as before; when both are sent,
         on_hand_count wins, so a dashboard can send both and work against an
         API from before on_hand_count. Call with the row locked.
+
+        A dashboard that sends reserved_count (the held units it showed) gets
+        a 409 when that has changed, for example a held checkout was paid
+        while the dialog was open, so a stale shelf count is never saved. A
+        shelf count below the held units is refused rather than clamped:
+        clamping would forget the missing units, and a later release would
+        put them back on sale.
         """
-        if "on_hand_count" in data:
-            on_hand = parse_int(data["on_hand_count"], "on_hand_count")
-            held = reserved_counts(seller_id, [candy_id]).get(candy_id, 0)
-            return max(0, on_hand - held)
-        return values.get("inventory_count")
+        if "on_hand_count" not in data:
+            return values.get("inventory_count")
+        on_hand = parse_int(data["on_hand_count"], "on_hand_count")
+        held = reserved_counts(seller_id, [candy_id]).get(candy_id, 0)
+        if "reserved_count" in data and parse_int(data["reserved_count"], "reserved_count") != held:
+            abort(
+                409,
+                description=(
+                    f"Your stock changed while you were editing: {held} now held in "
+                    "open checkouts. Check the count and save again."
+                ),
+            )
+        if on_hand < held:
+            abort(
+                400,
+                description=(
+                    f"{held} are held in open checkouts, so the shelf count must be "
+                    f"at least {held}."
+                ),
+            )
+        return on_hand - held
 
     def unique_pickup_code():
         for _ in range(12):
