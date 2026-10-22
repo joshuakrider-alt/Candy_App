@@ -25,11 +25,20 @@ test("an admin approves one application and turns down another", async ({ page, 
   await apply(sellerPage, approve);
   await apply(await (await browser.newContext()).newPage(), reject);
 
+  // /shops is cached; load it first so the copy without the new shop is fresh.
+  await page.goto("/shops");
+  await expect(page.getByRole("heading", { name: approve })).toHaveCount(0);
+
   await signIn(page, "admin");
   await expect(page).toHaveURL("/admin");
   await page.getByRole("listitem", { name: approve }).getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(`${approve} is live.`)).toBeVisible();
   await expect(page.getByRole("listitem", { name: approve })).toHaveCount(0);
+
+  // Approving drops the cached copy, so the shop is listed straight away.
+  await page.goto("/shops");
+  await expect(page.getByRole("heading", { name: approve })).toBeVisible();
+  await page.goto("/admin");
 
   await page.getByRole("listitem", { name: reject }).getByRole("button", { name: "Reject" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Reject" }).click();
@@ -46,6 +55,14 @@ test("an admin approves one application and turns down another", async ({ page, 
   const origin = new URL(page.url()).origin;
   const down = await page.request.put(`/api/flask/applications/${id}`, { data: { status: "rejected" }, headers: { origin } });
   expect(down.ok()).toBe(true);
+  // That call skips the screens, so a seller save is what drops the cached
+  // /shops (which now lists the test shop); it also checks the seller side.
+  await sellerPage.goto("/seller/storefront");
+  await sellerPage.getByLabel(/^Tagline/).fill("Fresh after school");
+  await sellerPage.getByRole("button", { name: "Save shop page" }).click();
+  await expect(sellerPage.getByText("Shop page saved.")).toBeVisible();
+  await page.goto("/shops");
+  await expect(page.getByRole("heading", { name: approve })).toHaveCount(0);
 });
 
 test("flow 12: buyers and sellers get no admin screens", async ({ page }) => {
