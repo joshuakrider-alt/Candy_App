@@ -859,6 +859,33 @@ def test_the_dashboard_shows_units_held_by_open_checkouts(client, buyer, kiki_se
     assert row["on_hand_count"] == 10
 
 
+def test_the_dashboard_reads_the_stock_label_with_the_count(app, client, kiki_seller):
+    """A sale between the row load and the count read must not pair 0 left with "In stock"."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    with app.app_context():
+        engine = db.engine
+    sold_out = {"done": False}
+
+    def sell_out_before_the_count_is_read(conn, cursor, statement, params, context, executemany):
+        if not sold_out["done"] and "sum(order_item.quantity)" in statement.lower():
+            sold_out["done"] = True
+            cursor.execute(
+                "UPDATE seller_inventory SET inventory_count = 0, status = 'out-of-stock' "
+                f"WHERE seller_id = {int(seller_id)} AND candy_id = {int(candy_id)}"
+            )
+
+    event.listen(engine, "before_cursor_execute", sell_out_before_the_count_is_read)
+    try:
+        row = seller_row(kiki_seller, seller_id, candy_id)
+    finally:
+        event.remove(engine, "before_cursor_execute", sell_out_before_the_count_is_read)
+
+    assert sold_out["done"]
+    assert row["inventory_count"] == 0
+    assert row["status"] == "out-of-stock"
+
+
 def test_a_shelf_count_typed_during_a_checkout_is_not_inflated_when_it_is_abandoned(
     app, client, buyer, kiki_seller, fake_stripe
 ):

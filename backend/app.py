@@ -439,9 +439,10 @@ def register_routes(app):
         should be on the shelf: for sale plus held), so a seller who counts the
         shelf can type that number back as on_hand_count.
         """
-        # The count and the held units are read in one statement, so a
-        # checkout committing in between cannot make on_hand_count add a
-        # reservation to a count it was not yet taken from (or the reverse).
+        # The count, its stock label and the held units are read in one
+        # statement, so a checkout committing in between cannot make
+        # on_hand_count add a reservation to a count it was not yet taken from
+        # (or the reverse), nor pair a fresh count with a stale status.
         held = (
             db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
             .join(Order, OrderItem.order_id == Order.id)
@@ -456,9 +457,9 @@ def register_routes(app):
         )
         candy_ids = [row.candy_id for row in rows]
         snapshot = {
-            candy_id: (count or 0, int(reserved or 0))
-            for candy_id, count, reserved in db.session.query(
-                SellerInventory.candy_id, SellerInventory.inventory_count, held
+            candy_id: (count or 0, status, int(reserved or 0))
+            for candy_id, count, status, reserved in db.session.query(
+                SellerInventory.candy_id, SellerInventory.inventory_count, SellerInventory.status, held
             ).filter(
                 SellerInventory.seller_id == seller_id,
                 SellerInventory.candy_id.in_(candy_ids),
@@ -467,8 +468,9 @@ def register_routes(app):
         payload = []
         for row in rows:
             data = row.to_dict()
-            count, reserved = snapshot.get(row.candy_id, (row.inventory_count or 0, 0))
+            count, status, reserved = snapshot.get(row.candy_id, (row.inventory_count or 0, row.status, 0))
             data["inventory_count"] = count
+            data["status"] = status
             data["reserved_count"] = reserved
             data["on_hand_count"] = count + reserved
             payload.append(data)

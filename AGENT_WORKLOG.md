@@ -542,6 +542,10 @@ DNS change; the Vercel connect half waits for the second project.
   `main` at cutover.
 - API tests: 245 passed, 8 skipped (SQLite). Browser tests: 102 passed.
 - No Vercel or Render settings changed. Cutover not started.
+- Later the same day: brought `staging` (#35's /shops refresh) into the
+  branch, and the seller inventory read now takes the stock label from the
+  same statement as the count and held units, so a sale in between cannot
+  show "0 left" next to "In stock" (Codex finding).
 
 ## Logging rule
 
