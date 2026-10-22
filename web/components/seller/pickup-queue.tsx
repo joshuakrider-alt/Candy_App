@@ -114,6 +114,13 @@ export function PickupQueue() {
                     <strong>{order.buyer_name}</strong> · {paidLabel(order)} · you keep {money(order.seller_payout_cents)}
                   </p>
                   <OrderItems order={order} />
+                  {!!order.stock_shortfall && (
+                    <p role="alert" className="text-sm font-bold text-destructive">
+                      Short {order.stock_shortfall} item{order.stock_shortfall === 1 ? "" : "s"}: this payment came in after the
+                      checkout timed out and the stock was sold again. Check your shelf, and ask the admin for a refund if you
+                      cannot fill it.
+                    </p>
+                  )}
                   {next && (
                     <Button
                       onClick={() => advance(order)}

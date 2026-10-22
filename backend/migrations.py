@@ -80,6 +80,9 @@ NEW_COLUMNS = (
     # guessed here. A later charge.refunded for the order records it.
     ("order", "refunded_cents", "INTEGER NOT NULL DEFAULT 0"),
     ("order", "platform_fee_refunded_cents", "INTEGER NOT NULL DEFAULT 0"),
+    # 0 for every existing order: none was ever flagged, and a shortfall
+    # cannot be worked out after the fact.
+    ("order", "stock_shortfall", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

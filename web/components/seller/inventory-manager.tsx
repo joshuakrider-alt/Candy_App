@@ -33,6 +33,9 @@ type Editing = { mode: "new" } | { mode: "own"; item: InventoryItem } | { mode: 
 
 const field = "flex flex-col gap-1.5 text-sm font-bold text-cola";
 
+/** What is on the shelf: units for sale plus units held by open checkouts. */
+const onHand = (item: InventoryItem) => item.on_hand_count ?? item.inventory_count;
+
 /** Dollars typed by a seller ("1.50", "$2") to cents, or null when it isn't a price. */
 export function toCents(value: string) {
   const text = value.trim().replace(/^\$/, "");
@@ -56,7 +59,10 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       setError("Stock must be a whole number, 0 or more.");
       return;
     }
-    let body: Record<string, unknown> = { inventory_count: count };
+    // The count is what is on the shelf. Flask takes the units held by open
+    // checkouts back off on_hand_count; inventory_count is only read by an API
+    // from before on_hand_count. A new item has nothing held yet.
+    let body: Record<string, unknown> = { on_hand_count: count, inventory_count: count };
     if (editing.mode !== "count") {
       const priceCents = toCents(String(data.get("price") ?? ""));
       if (priceCents === null) {
@@ -123,16 +129,21 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
             </>
           )}
           <label className={field}>
-            How many you have
+            {editing?.mode === "new" ? "How many you have" : "How many are on your shelf"}
             <Input
               name="inventory_count"
               type="number"
               min={0}
               step={1}
               required
-              defaultValue={item?.inventory_count ?? 10}
+              defaultValue={item ? onHand(item) : 10}
               className="h-11 bg-white"
             />
+            {!!item?.reserved_count && (
+              <span className="font-normal text-muted-foreground">
+                Include the {item.reserved_count} held in open checkouts; leave out ones packed for paid orders.
+              </span>
+            )}
           </label>
           <FormMessage error>{error}</FormMessage>
           <DialogFooter>
@@ -204,7 +215,9 @@ export function InventoryManager() {
   async function toggle(item: InventoryItem) {
     const out = item.status === "out-of-stock";
     // Same rule as the old page: back in stock starts at no fewer than 8.
-    const body = out ? { status: "in-stock", inventory_count: Math.max(8, item.inventory_count) } : { status: "out-of-stock" };
+    const body = out
+      ? { status: "in-stock", on_hand_count: Math.max(8, onHand(item)), inventory_count: Math.max(8, item.inventory_count) }
+      : { status: "out-of-stock" };
     setBusy(item.candy_id);
     try {
       await api.put(`/sellers/${sellerId}/inventory/${item.candy_id}`, body);
@@ -267,6 +280,7 @@ export function InventoryManager() {
                     <h3 className="font-heading text-lg font-extrabold text-cola">{candy.name}</h3>
                     <p className="text-sm text-cola">
                       {money(candy.price_cents)} · {item.inventory_count} left ·{" "}
+                      {!!item.reserved_count && <>{item.reserved_count} held in open checkouts · </>}
                       <strong className={out ? "text-destructive" : undefined}>{STOCK_LABEL[item.status]}</strong>
                     </p>
                   </div>

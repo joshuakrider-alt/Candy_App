@@ -483,6 +483,10 @@ class Order(db.Model):
     # with "Refund application fee" returns the fee in proportion, so the
     # platform's take and the seller's share both move.
     platform_fee_refunded_cents = db.Column(db.Integer, nullable=False, default=0)
+    # Units this order is owed that were not on the shelf when its payment
+    # landed. Only a payment that arrives after the sweep released the stock
+    # can leave this above 0: by then the units may have gone to someone else.
+    stock_shortfall = db.Column(db.Integer, nullable=False, default=0)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")
@@ -524,6 +528,7 @@ class Order(db.Model):
             "total_cents": self.total_cents,
             "refunded_cents": self.refunded_cents or 0,
             "platform_fee_refunded_cents": self.platform_fee_refunded_cents or 0,
+            "stock_shortfall": self.stock_shortfall or 0,
             "payment_status": self.payment_status,
             "platform_fee_cents": self.platform_fee_cents,
             "seller_payout_cents": self.seller_payout_cents,

@@ -143,6 +143,41 @@ test("stock and items: add, edit, mark out and remove the shop's own item", asyn
   await expect(row).toHaveCount(0);
 });
 
+test("held stock: the shelf count includes open checkouts, and a short order says so", async ({ page }) => {
+  // Flask adds reserved_count and on_hand_count; here 3 are held on the first item.
+  type Row = { candy_id: number; inventory_count: number; reserved_count?: number; on_hand_count?: number; candy: { name: string } | null };
+  let held: Row | undefined;
+  await page.route("**/api/flask/sellers/*/inventory", async (route) => {
+    const rows = (await (await route.fetch()).json()) as Row[];
+    held = rows.find((r) => r.candy && r.inventory_count > 0)!;
+    held.reserved_count = 3;
+    held.on_hand_count = held.inventory_count + 3;
+    await route.fulfill({ json: rows });
+  });
+  const sent: unknown[] = [];
+  await page.route("**/api/flask/sellers/*/inventory/*", async (route) => {
+    sent.push(route.request().postDataJSON());
+    await route.fulfill({ json: held });
+  });
+  await page.route("**/api/flask/sellers/*/orders", (route) => route.fulfill({ json: [{ ...queueOrder("new"), stock_shortfall: 2 }] }));
+
+  await signIn(page, "seller");
+  await expect(page.getByRole("listitem", { name: "Order #77" })).toContainText("Short 2 items");
+
+  await page.goto("/seller/inventory");
+  await expect(page.getByText("3 held in open checkouts")).toBeVisible();
+  const row = page.getByRole("listitem", { name: held!.candy!.name, exact: true });
+  await expect(row).toContainText("3 held in open checkouts");
+  await row.getByRole("button", { name: /Set count|Edit/ }).click();
+  const dialog = page.getByRole("dialog");
+  const count = dialog.getByLabel("How many are on your shelf");
+  await expect(count).toHaveValue(String(held!.on_hand_count));
+  await count.fill("12");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(sent).toEqual([{ on_hand_count: 12, inventory_count: 12 }]);
+});
+
 test("the shop page form previews as you type and saves", async ({ page }) => {
   await signIn(page, "seller", "/seller/storefront");
   await expect(page).toHaveURL("/seller/storefront");

@@ -102,6 +102,10 @@ export type InventoryItem = {
   inventory_count: number;
   status: StockStatus;
   candy: Candy | null;
+  /** Seller's own inventory routes only: units held by open checkouts. */
+  reserved_count?: number;
+  /** Seller's own inventory routes only: for sale plus held, what is on the shelf. */
+  on_hand_count?: number;
 };
 
 export type OrderStatus = "new" | "packing" | "ready" | "completed";
@@ -133,6 +137,8 @@ export type Order = {
   total_cents: number;
   refunded_cents: number;
   platform_fee_refunded_cents: number;
+  /** Units not on the shelf when a late payment landed (0 normally). */
+  stock_shortfall?: number;
   payment_status: PaymentStatus;
   platform_fee_cents: number;
   seller_payout_cents: number;

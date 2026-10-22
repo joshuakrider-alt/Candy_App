@@ -344,12 +344,28 @@ def register_routes(app):
         order.inventory_released_at = utcnow()
 
     def reserve_order_inventory(order):
+        """Take a paid order's units back off the shelf after a release.
+
+        The count cannot go below zero, so units that were sold to someone
+        else in the meantime are recorded on the order as a shortfall instead
+        of vanishing: the seller has to fill or refund them.
+        """
         rows = locked_inventory_for(order)
+        shortfall = 0
         for item in order.items:
             inventory = rows.get(item.candy_id)
+            on_shelf = (inventory.inventory_count or 0) if inventory else 0
+            shortfall += max(0, item.quantity - on_shelf)
             if inventory:
                 inventory.apply_count_change(-item.quantity)
         order.inventory_released_at = None
+        order.stock_shortfall = shortfall
+        if shortfall:
+            logger.warning(
+                "order %s was paid after its stock was released and is %s unit(s) short",
+                order.id,
+                shortfall,
+            )
 
     def pending_order_ttl_minutes():
         """How long a checkout may hold stock before the sweep releases it.
@@ -391,6 +407,71 @@ def register_routes(app):
             release_order_inventory(order)
             order.payment_status = "expired"
         db.session.commit()
+
+    def reserved_counts(seller_id, candy_ids):
+        """Units of each item held by this shop's open checkouts.
+
+        Those units are already taken out of inventory_count but are still on
+        the seller's shelf, and they go back into inventory_count if the buyer
+        abandons the checkout.
+        """
+        candy_ids = list(candy_ids)
+        if not candy_ids:
+            return {}
+        rows = (
+            db.session.query(OrderItem.candy_id, func.sum(OrderItem.quantity))
+            .join(Order, OrderItem.order_id == Order.id)
+            .filter(
+                Order.seller_id == seller_id,
+                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
+                Order.inventory_released_at.is_(None),
+                OrderItem.candy_id.in_(candy_ids),
+            )
+            .group_by(OrderItem.candy_id)
+            .all()
+        )
+        return {candy_id: int(total or 0) for candy_id, total in rows}
+
+    def seller_inventory_payload(seller_id, rows):
+        """Inventory rows for the seller's own dashboard.
+
+        Adds reserved_count (held by open checkouts) and on_hand_count (what
+        should be on the shelf: for sale plus held), so a seller who counts the
+        shelf can type that number back as on_hand_count.
+        """
+        reserved = reserved_counts(seller_id, [row.candy_id for row in rows])
+        payload = []
+        for row in rows:
+            data = row.to_dict()
+            data["reserved_count"] = reserved.get(row.candy_id, 0)
+            data["on_hand_count"] = (row.inventory_count or 0) + data["reserved_count"]
+            payload.append(data)
+        return payload
+
+    def lock_seller_inventory_row(seller_id, candy_id):
+        """One shelf row under a write lock, or None.
+
+        create_order and the sweep change the count under the same lock, so a
+        seller's edit can neither overwrite a reservation that is committing
+        nor read the held units while a release is putting them back.
+        """
+        return seller_inventory_lock_query(seller_id, [candy_id]).first()
+
+    def requested_available_count(data, values, seller_id, candy_id):
+        """The sellable count a seller's edit asks for, or None for no change.
+
+        on_hand_count is the number on the shelf, so the units held by open
+        checkouts are taken off it here; otherwise they would be counted twice
+        once the checkout is released. inventory_count is still accepted and
+        means the sellable count itself, as before; when both are sent,
+        on_hand_count wins, so a dashboard can send both and work against an
+        API from before on_hand_count. Call with the row locked.
+        """
+        if "on_hand_count" in data:
+            on_hand = parse_int(data["on_hand_count"], "on_hand_count")
+            held = reserved_counts(seller_id, [candy_id]).get(candy_id, 0)
+            return max(0, on_hand - held)
+        return values.get("inventory_count")
 
     def unique_pickup_code():
         for _ in range(12):
@@ -1501,7 +1582,7 @@ def register_routes(app):
         )
         db.session.add(inventory)
         db.session.commit()
-        return jsonify(inventory.to_dict()), 201
+        return jsonify(seller_inventory_payload(seller_id, [inventory])[0]), 201
 
     @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["PUT"])
     @require_roles("seller", "admin")
@@ -1511,15 +1592,17 @@ def register_routes(app):
         candy = owned_item_or_404(seller_id, candy_id)
         if not candy.is_active:
             abort(400, description="removed items cannot be edited")
-        values = seller_item_values(request.get_json() or {}, partial=True)
-        inventory = SellerInventory.query.filter_by(
-            seller_id=seller_id, candy_id=candy_id
-        ).first_or_404()
+        data = request.get_json() or {}
+        values = seller_item_values(data, partial=True)
+        inventory = lock_seller_inventory_row(seller_id, candy_id)
+        if inventory is None:
+            abort(404)
         for field in ("name", "description", "price_cents"):
             if field in values:
                 setattr(candy, field, values[field])
-        if "inventory_count" in values:
-            inventory.inventory_count = values["inventory_count"]
+        count = requested_available_count(data, values, seller_id, candy_id)
+        if count is not None:
+            inventory.inventory_count = count
             if inventory.inventory_count == 0:
                 inventory.status = "out-of-stock"
             elif "status" not in values:
@@ -1529,7 +1612,7 @@ def register_routes(app):
             if inventory.status == "out-of-stock":
                 inventory.inventory_count = 0
         db.session.commit()
-        return jsonify(inventory.to_dict())
+        return jsonify(seller_inventory_payload(seller_id, [inventory])[0])
 
     @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["DELETE"])
     @require_roles("seller", "admin")
@@ -1560,7 +1643,7 @@ def register_routes(app):
             .order_by(Candy.name)
             .all()
         )
-        return jsonify([item.to_dict() for item in inventory])
+        return jsonify(seller_inventory_payload(seller_id, inventory))
 
     @app.route("/sellers/<int:seller_id>/inventory/<int:candy_id>", methods=["PUT"])
     @require_roles("seller", "admin")
@@ -1571,17 +1654,16 @@ def register_routes(app):
         if not candy.is_active or candy.owner_seller_id not in (None, seller_id):
             abort(403, description="this item is not available to this shop")
         data = request.get_json() or {}
-        inventory = SellerInventory.query.filter_by(
-            seller_id=seller_id, candy_id=candy_id
-        ).first()
+        inventory = lock_seller_inventory_row(seller_id, candy_id)
 
         if inventory is None:
             inventory = SellerInventory(seller_id=seller_id, candy_id=candy_id)
             db.session.add(inventory)
 
-        count = None
+        values = {}
         if "inventory_count" in data:
-            count = parse_int(data["inventory_count"], "inventory_count")
+            values["inventory_count"] = parse_int(data["inventory_count"], "inventory_count")
+        count = requested_available_count(data, values, seller_id, candy_id)
         status = None
         if "status" in data:
             status = data["status"]
@@ -1604,7 +1686,7 @@ def register_routes(app):
             inventory.status = "out-of-stock"
 
         db.session.commit()
-        return jsonify(inventory.to_dict())
+        return jsonify(seller_inventory_payload(seller_id, [inventory])[0])
 
     @app.route("/sellers/<int:seller_id>/orders", methods=["GET"])
     @require_roles("seller", "admin")

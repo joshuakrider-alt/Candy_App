@@ -496,6 +496,40 @@ DNS change; the Vercel connect half waits for the second project.
   Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
 - No Vercel or Render settings changed. Cutover not started.
 
+## 2026-10-03 — Seller stock edits during open checkouts
+
+- Seller stock saves set an absolute count with no row lock, so a save could
+  overwrite a reservation that was committing, and a shelf count typed while
+  a checkout held units was inflated when that checkout was abandoned
+  (10 on the shelf, 3 held, seller types 10, release makes it 13).
+- Both stock PUT routes now lock the shelf row (same lock as checkout and the
+  sweep). The seller dashboard sends `on_hand_count` (what is on the shelf);
+  the API subtracts units held by open checkouts. `inventory_count` alone keeps
+  its old meaning. Seller inventory responses add `reserved_count` and
+  `on_hand_count`.
+- A payment that lands after the sweep released its stock, when that stock has
+  since been sold, now records `order.stock_shortfall` (new column, boot
+  migration, default 0) and logs a warning. The seller order queue shows it.
+- Known limit: marking an item "out" while a checkout holds units still lets
+  those units come back if that checkout is abandoned.
+- Deploy order does not matter: the dashboard sends both fields.
+
+## 2026-10-22 — Stock reservations (#22) folded into staging (Claude Code)
+
+- Merged draft #22's branch into `staging` unchanged on the API side (row
+  lock on seller stock saves, `on_hand_count`, `reserved_count`,
+  `order.stock_shortfall` added by the boot migration).
+- Ported its dashboard half to the Next.js seller screens: the stock dialog
+  starts from the shelf count and sends `on_hand_count` (plus
+  `inventory_count` for an older API), rows show "N held in open
+  checkouts", and the pickup queue warns when a late payment left an order
+  short.
+- The staging API deploys from `staging`, so the new column lands on the
+  Neon staging branch only. Production gets it only when `staging` reaches
+  `main` at cutover.
+- API tests: 245 passed, 8 skipped (SQLite). Browser tests: 102 passed.
+- No Vercel or Render settings changed. Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
