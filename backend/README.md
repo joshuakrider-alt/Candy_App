@@ -202,14 +202,20 @@ answers 503 saying so.
 
 Seller flow (buttons on `seller.html`):
 
-1. **Connect Stripe** → `POST /sellers/<id>/stripe/connect` creates the Express
-   account the first time (reuses it after) and returns a one-time Account Link.
+1. **Connect Stripe** → `POST /sellers/<id>/stripe/connect` creates the
+   account the first time through Accounts v2 (`POST /v2/core/accounts`,
+   Express dashboard, merchant `card_payments` plus recipient
+   `stripe_transfers`, platform pays fees and covers losses) and reuses it
+   after. It returns a one-time v2 Account Link.
    The seller enters bank, identity and tax details on Stripe's page; none of
    it reaches this API.
 2. Stripe returns to `seller.html?stripe=return` (or `?stripe=refresh` if the
    link expired, which re-opens onboarding). The page calls
-   `GET /sellers/<id>/stripe/status`, which retrieves the account and mirrors
-   `charges_enabled` / `details_submitted` onto the shop.
+   `GET /sellers/<id>/stripe/status`, which retrieves the account (v2) and
+   mirrors `charges_enabled` / `details_submitted` onto the shop. v2 has no
+   such flags, so `connect.readiness` works them out: charges once card
+   payments and transfers are both active, details once nothing is
+   currently due or past due.
 3. `account.updated` webhooks keep those flags current afterwards (e.g. Stripe
    asks for more info and switches charges off).
 

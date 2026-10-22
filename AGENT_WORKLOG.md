@@ -496,6 +496,23 @@ DNS change; the Vercel connect half waits for the second project.
   Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
 - No Vercel or Render settings changed. Cutover not started.
 
+## 2026-10-22 — Connect accounts created through Accounts v2 (Claude Code)
+
+- Joshua turned on "Accounts v1 support" in the Stripe sandbox because the
+  v1 account create was refused. `backend/connect.py` now creates accounts
+  with `POST /v2/core/accounts` (Express dashboard, merchant `card_payments`
+  and recipient `stripe_transfers` requested, fees and losses on the
+  platform), retrieves them with v2 and opens onboarding with v2 Account
+  Links. The Express login link stays on v1 (v2 has none); destination
+  charges and refunds are unchanged.
+- `connect.readiness` reads both shapes: the v1 `account.updated` webhook
+  still sends `charges_enabled` / `details_submitted`.
+- Checked against the request shapes in stripe-python 15.6.1 (API version
+  2026-08-26.dahlia); Stripe's docs site is blocked from this container.
+  Not yet tried against Stripe itself.
+- API tests: 239 passed, 7 skipped. No Stripe, Vercel or Render settings
+  changed. Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

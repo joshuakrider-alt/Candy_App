@@ -18,32 +18,50 @@ import payments
 from models import Order, Seller, db
 
 
+def v2_account(account_id, cards="pending", transfers="pending", due="currently_due"):
+    """An Accounts v2 account as Stripe returns it with our include list."""
+    return {
+        "id": account_id,
+        "object": "v2.core.account",
+        "dashboard": "express",
+        "configuration": {
+            "merchant": {"capabilities": {"card_payments": {"status": cards}}},
+            "recipient": {
+                "capabilities": {"stripe_balance": {"stripe_transfers": {"status": transfers}}}
+            },
+        },
+        "requirements": {
+            "entries": [{"description": "Bank account", "minimum_deadline": {"status": due}}]
+            if due
+            else []
+        },
+    }
+
+
 class FakeConnect:
-    """Records Connect calls and replays canned accounts."""
+    """Records Connect calls and replays canned Accounts v2 accounts."""
 
     def __init__(self):
         self.accounts = {}
         self.created = []
+        self.retrieved = []
         self.links = []
         self.refunds = []
         self.refuse_with = None
 
-    def create_account(self, **params):
+    def create_account(self, params):
         if self.refuse_with is not None:
             raise self.refuse_with
         account_id = f"acct_fake_{len(self.accounts) + 1}"
         self.created.append(params)
-        self.accounts[account_id] = {
-            "id": account_id,
-            "charges_enabled": False,
-            "details_submitted": False,
-        }
+        self.accounts[account_id] = v2_account(account_id)
         return dict(self.accounts[account_id])
 
-    def retrieve_account(self, account_id, **_kwargs):
+    def retrieve_account(self, account_id, params=None):
+        self.retrieved.append(params)
         return dict(self.accounts[account_id])
 
-    def create_link(self, **params):
+    def create_link(self, params):
         self.links.append(params)
         return {"url": f"https://connect.stripe.test/setup/{params['account']}"}
 
@@ -52,23 +70,26 @@ class FakeConnect:
         return {"id": "re_fake_1", "status": "succeeded"}
 
     def finish_onboarding(self, account_id):
-        self.accounts[account_id].update(charges_enabled=True, details_submitted=True)
+        self.accounts[account_id] = v2_account(account_id, "active", "active", due=None)
+
+
+class FakeClient:
+    """Stands in for stripe.StripeClient: client.v2.core.accounts / account_links."""
+
+    def __init__(self, fake):
+        accounts = type("Accounts", (), {})()
+        accounts.create = fake.create_account
+        accounts.retrieve = fake.retrieve_account
+        links = type("AccountLinks", (), {})()
+        links.create = fake.create_link
+        core = type("Core", (), {"accounts": accounts, "account_links": links})()
+        self.v2 = type("V2", (), {"core": core})()
 
 
 @pytest.fixture
 def fake_connect(monkeypatch):
     fake = FakeConnect()
-    monkeypatch.setattr(
-        connect.stripe.Account, "create", lambda **params: fake.create_account(**params)
-    )
-    monkeypatch.setattr(
-        connect.stripe.Account,
-        "retrieve",
-        lambda account_id, **kwargs: fake.retrieve_account(account_id, **kwargs),
-    )
-    monkeypatch.setattr(
-        connect.stripe.AccountLink, "create", lambda **params: fake.create_link(**params)
-    )
+    monkeypatch.setattr(connect, "_client", lambda _api_key: FakeClient(fake))
     monkeypatch.setattr(
         payments.stripe.Refund, "create", lambda **params: fake.create_refund(**params)
     )
@@ -209,12 +230,29 @@ def test_seller_onboards_an_express_account(unconnected_app, fake_connect, fake_
     body = started.get_json()
     assert body["url"].startswith("https://connect.stripe.test/setup/")
     assert body["status"] == "onboarding"
+    # Accounts v2: Express dashboard, platform pays fees and covers losses,
+    # card payments plus transfers for destination charges.
     created = fake_connect.created[-1]
-    assert created["type"] == "express"
+    assert created["dashboard"] == "express"
+    assert created["defaults"]["responsibilities"] == {
+        "fees_collector": "application",
+        "losses_collector": "application",
+    }
+    assert created["configuration"]["merchant"]["capabilities"] == {
+        "card_payments": {"requested": True}
+    }
+    assert created["configuration"]["recipient"]["capabilities"] == {
+        "stripe_balance": {"stripe_transfers": {"requested": True}}
+    }
+    assert created["identity"] == {"country": "US", "entity_type": "individual"}
     assert created["metadata"] == {"seller_id": str(seller_id)}
+    assert "type" not in created and "capabilities" not in created
     link = fake_connect.links[-1]
-    assert link["return_url"].endswith("/seller.html?stripe=return")
-    assert link["refresh_url"].endswith("/seller.html?stripe=refresh")
+    assert link["use_case"]["type"] == "account_onboarding"
+    onboarding = link["use_case"]["account_onboarding"]
+    assert onboarding["configurations"] == ["merchant", "recipient"]
+    assert onboarding["return_url"].endswith("/seller.html?stripe=return")
+    assert onboarding["refresh_url"].endswith("/seller.html?stripe=refresh")
 
     # Asking again reuses the account and just issues a fresh link.
     again = kiki.post(f"/sellers/{seller_id}/stripe/connect").get_json()
@@ -235,6 +273,29 @@ def test_seller_onboards_an_express_account(unconnected_app, fake_connect, fake_
     assert fake_stripe.created_sessions[-1]["payment_intent_data"]["transfer_data"] == {
         "destination": body["account_id"]
     }
+
+
+@pytest.mark.parametrize(
+    "cards, transfers, due, expected",
+    [
+        ("pending", "pending", "currently_due", (False, False)),
+        # Onboarding sent, Stripe still checking: submitted but not chargeable.
+        ("pending", "pending", "eventually_due", (False, True)),
+        ("active", "pending", None, (False, True)),
+        ("active", "active", None, (True, True)),
+        ("restricted", "active", "past_due", (False, False)),
+    ],
+)
+def test_v2_account_readiness(cards, transfers, due, expected):
+    assert connect.readiness(v2_account("acct_x", cards, transfers, due)) == expected
+
+
+def test_v1_account_readiness_is_read_as_sent():
+    assert connect.readiness({"id": "acct_x", "charges_enabled": True, "details_submitted": True}) == (
+        True,
+        True,
+    )
+    assert connect.readiness({"id": "acct_x"}) == (False, False)
 
 
 def test_connect_endpoints_are_owner_or_admin_only(
