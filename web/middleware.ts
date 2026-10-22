@@ -18,7 +18,7 @@ const SIGNED_IN = ["/account", "/seller", "/admin"];
  * signed-in layouts read the session, and the sign-in pages opt in with
  * `dynamic = "force-dynamic"`.
  */
-const NONCE_PATHS = [...SIGNED_IN, "/login", "/signup", "/checkout"];
+const NONCE_PATHS = [...SIGNED_IN, "/login", "/signup", "/checkout", "/sell"];
 
 const isUnder = (pathname: string, roots: string[]) =>
   roots.some((root) => pathname === root || pathname.startsWith(`${root}/`));
@@ -26,6 +26,25 @@ const isUnder = (pathname: string, roots: string[]) =>
 const dev = process.env.NODE_ENV !== "production";
 // Vercel's preview toolbar and comments load from vercel.live.
 const preview = process.env.VERCEL_ENV === "preview";
+
+/**
+ * Where seller photos are uploaded: the origin of the API's
+ * STORAGE_ENDPOINT_URL, e.g. https://<account>.r2.cloudflarestorage.com.
+ * The signed link may put the bucket in front of that host, so its
+ * subdomains are allowed too. Unset means uploads are blocked.
+ */
+function uploadSources() {
+  const raw = process.env.UPLOAD_ORIGIN;
+  if (!raw) return "";
+  try {
+    const { protocol, host } = new URL(raw);
+    if (protocol !== "https:") return "";
+    return ` https://${host} https://*.${host}`;
+  } catch {
+    return "";
+  }
+}
+const uploads = uploadSources();
 
 function policy(scriptSrc: string) {
   const live = preview ? " https://vercel.live" : "";
@@ -38,7 +57,7 @@ function policy(scriptSrc: string) {
     // images are allowed from any https source.
     "img-src 'self' data: blob: https:",
     `font-src 'self'${live}`,
-    `connect-src 'self'${live}`,
+    `connect-src 'self'${uploads}${live}`,
     `frame-src 'self'${live}`,
     "frame-ancestors 'none'",
     "object-src 'none'",

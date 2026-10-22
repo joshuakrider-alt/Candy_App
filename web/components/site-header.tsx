@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Search, ShoppingBag } from "lucide-react";
+import { Search } from "lucide-react";
 import { AccountMenu } from "@/components/account-menu";
+import { CartButton } from "@/components/cart/cart-button";
 import { NAV_LINKS } from "@/components/site-links";
 
 export function SiteHeader() {
@@ -41,13 +42,7 @@ export function SiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2 md:ml-0">
-          <Link
-            href="/cart"
-            aria-label="Cart"
-            className="hidden size-9 items-center justify-center rounded-full border border-border bg-white/80 text-cola hover:bg-accent md:inline-flex"
-          >
-            <ShoppingBag aria-hidden className="size-4" />
-          </Link>
+          <CartButton />
           <AccountMenu />
         </div>
       </div>
