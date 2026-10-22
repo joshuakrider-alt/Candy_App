@@ -1175,3 +1175,44 @@ def test_the_first_paid_checkout_gets_the_real_unit_and_the_deficit_stays_open(
 
     let_the_sweep_release(app, client, second["id"])
     assert inventory_count(client, seller_id, candy_id) == 0
+
+
+def test_units_a_paid_order_is_short_of_are_not_counted_as_at_the_shop(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    """3 at the shop: 1 for a late order that is 2 short, 2 held by a checkout."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    kiki_seller.put(f"/sellers/{seller_id}/inventory/{candy_id}", json={"on_hand_count": 3})
+    late = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    late_session = fake_stripe.last_session_id
+    let_the_sweep_release(app, client, late["id"])
+    place_order(buyer, seller_id, candy_id, quantity=2)
+    fake_stripe.mark_paid(late_session)
+    assert buyer.post(f"/orders/{late['id']}/payment/confirm").get_json()["stock_shortfall"] == 2
+
+    row = seller_row(kiki_seller, seller_id, candy_id)
+    assert row["awaiting_pickup_count"] == 1
+    assert row["reserved_count"] == 2
+    assert row["on_hand_count"] == 3
+
+
+def test_a_count_below_what_paid_orders_need_marks_them_short(
+    client, buyer, kiki_seller, fake_stripe
+):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 5})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+    buyer.post(f"/orders/{order['id']}/payment/confirm")
+
+    row = kiki_seller.put(url, json={"on_hand_count": 2}).get_json()
+    assert row["on_hand_count"] == 2
+    assert row["inventory_count"] == 0
+    assert buyer.get(f"/orders/{order['id']}").get_json()["stock_shortfall"] == 1
+
+    # The seller finds the missing unit: the order is whole again.
+    kiki_seller.put(url, json={"on_hand_count": 3})
+    assert buyer.get(f"/orders/{order['id']}").get_json()["stock_shortfall"] == 0

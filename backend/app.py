@@ -369,8 +369,8 @@ def register_routes(app):
             real = still_held.get(item.candy_id, 0) + item.quantity - inventory.held_shortfall
             short = item.quantity - min(item.quantity, max(0, real))
             inventory.held_shortfall -= short
+            item.stock_shortfall = short
             shortfall += short
-        order.stock_shortfall = shortfall
         if shortfall:
             logger.warning(
                 "order %s was paid for units its seller says are not on the shelf; %s unit(s) short",
@@ -390,11 +390,11 @@ def register_routes(app):
         for item in order.items:
             inventory = rows.get(item.candy_id)
             on_shelf = (inventory.inventory_count or 0) if inventory else 0
-            shortfall += max(0, item.quantity - on_shelf)
+            item.stock_shortfall = max(0, item.quantity - on_shelf)
+            shortfall += item.stock_shortfall
             if inventory:
                 inventory.apply_count_change(-item.quantity)
         order.inventory_released_at = None
-        order.stock_shortfall = shortfall
         if shortfall:
             logger.warning(
                 "order %s was paid after its stock was released and is %s unit(s) short",
@@ -457,12 +457,16 @@ def register_routes(app):
             Order.status.in_(("new", "packing", "ready")),
         )
 
+    def units_at_shop():
+        """An order line's units that are actually at the shop."""
+        return OrderItem.quantity - OrderItem.stock_shortfall
+
     def counts_by_candy(seller_id, candy_ids, order_filter):
         candy_ids = list(candy_ids)
         if not candy_ids:
             return {}
         rows = (
-            db.session.query(OrderItem.candy_id, func.sum(OrderItem.quantity))
+            db.session.query(OrderItem.candy_id, func.sum(units_at_shop()))
             .join(Order, OrderItem.order_id == Order.id)
             .filter(
                 Order.seller_id == seller_id,
@@ -495,7 +499,7 @@ def register_routes(app):
         two separate reads could otherwise show a shelf count that never was.
         """
         return (
-            db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
+            db.session.query(func.coalesce(func.sum(units_at_shop()), 0))
             .join(Order, OrderItem.order_id == Order.id)
             .filter(
                 Order.seller_id == SellerInventory.seller_id,
@@ -546,28 +550,44 @@ def register_routes(app):
         """
         return seller_inventory_lock_query(seller_id, [candy_id]).first()
 
+    def awaiting_pickup_items(seller_id, candy_id):
+        """Lines of paid orders not picked up yet, first paid first."""
+        return (
+            OrderItem.query.join(Order, OrderItem.order_id == Order.id)
+            .filter(
+                Order.seller_id == seller_id,
+                OrderItem.candy_id == candy_id,
+                *awaiting_pickup_filter(),
+            )
+            .order_by(Order.paid_at.asc(), Order.id.asc())
+            .all()
+        )
+
     def requested_available_count(data, values, inventory):
         """The sellable count a seller's edit asks for, or None for no change.
 
-        on_hand_count is everything the seller has, so units held by open
-        checkouts and units in paid orders not yet picked up are taken off it
-        here; otherwise they would be sold twice. When the count is short of
-        those, the paid orders keep their units and the missing ones are kept
-        as the row's held_shortfall, so releasing or paying for the open
-        checkouts cannot bring back units that do not exist. inventory_count
-        is still accepted and means the sellable count itself, as before; when
-        both are sent, on_hand_count wins, so a dashboard can send both and
-        work against an API from before on_hand_count. Call with the row
-        locked.
+        on_hand_count is everything the seller has. Paid orders not picked up
+        yet get those units first, earliest paid first, and each line's
+        stock_shortfall is recomputed from the count; open checkouts get what
+        is left, and any they are missing is kept as the row's held_shortfall,
+        so releasing or paying for them cannot bring back units that do not
+        exist. Only the rest is for sale. inventory_count is still accepted and
+        means the sellable count itself, as before; when both are sent,
+        on_hand_count wins, so a dashboard can send both and work against an
+        API from before on_hand_count. Call with the row locked: every change
+        to these shortfalls holds the same lock.
         """
         if "on_hand_count" in data:
-            on_hand = parse_int(data["on_hand_count"], "on_hand_count")
-            ids = [inventory.candy_id]
-            held = reserved_counts(inventory.seller_id, ids).get(inventory.candy_id, 0)
-            awaiting = awaiting_pickup_counts(inventory.seller_id, ids).get(inventory.candy_id, 0)
-            committed = held + awaiting
-            inventory.held_shortfall = min(held, max(0, committed - on_hand))
-            return max(0, on_hand - committed)
+            left = parse_int(data["on_hand_count"], "on_hand_count")
+            for item in awaiting_pickup_items(inventory.seller_id, inventory.candy_id):
+                real = min(item.quantity, left)
+                item.stock_shortfall = item.quantity - real
+                left -= real
+            held = reserved_counts(inventory.seller_id, [inventory.candy_id]).get(
+                inventory.candy_id, 0
+            )
+            inventory.held_shortfall = max(0, held - left)
+            return max(0, left - held)
         # A legacy sellable count says nothing about the held units, so a
         # known deficit among them is kept.
         return values.get("inventory_count")

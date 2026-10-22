@@ -494,10 +494,6 @@ class Order(db.Model):
     # with "Refund application fee" returns the fee in proportion, so the
     # platform's take and the seller's share both move.
     platform_fee_refunded_cents = db.Column(db.Integer, nullable=False, default=0)
-    # Units this order is owed that were not on the shelf when its payment
-    # landed. Only a payment that arrives after the sweep released the stock
-    # can leave this above 0: by then the units may have gone to someone else.
-    stock_shortfall = db.Column(db.Integer, nullable=False, default=0)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")
@@ -520,6 +516,11 @@ class Order(db.Model):
     @property
     def seller_payout_cents(self):
         return max(0, self.net_total_cents - self.net_platform_fee_cents)
+
+    @property
+    def stock_shortfall(self):
+        """Units this paid order is owed that the shop does not have."""
+        return sum(item.stock_shortfall or 0 for item in self.items)
 
     @property
     def payout_method(self):
@@ -566,6 +567,10 @@ class OrderItem(db.Model):
     candy_id = db.Column(db.Integer, db.ForeignKey("candy.id"), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
     unit_price_cents = db.Column(db.Integer, nullable=False, default=0)
+    # Units of this line the shop does not have for a paid order: its payment
+    # landed after they were sold again, or the seller's count came up short.
+    # A seller's recount of the item recomputes it.
+    stock_shortfall = db.Column(db.Integer, nullable=False, default=0)
 
     order = db.relationship("Order", back_populates="items")
     candy = db.relationship("Candy")
@@ -577,5 +582,6 @@ class OrderItem(db.Model):
             "quantity": self.quantity,
             "unit_price_cents": self.unit_price_cents,
             "line_total_cents": (self.quantity or 0) * (self.unit_price_cents or 0),
+            "stock_shortfall": self.stock_shortfall or 0,
             "candy": self.candy.to_dict() if self.candy else None,
         }
