@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { FormMessage, Panel } from "@/components/panel";
 import { errorText } from "@/lib/error-text";
 import { useSellerId, useSellerShop } from "@/components/seller/seller-shop";
+import { refreshShopPages } from "@/app/actions/refresh-shops";
 import { api } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { InventoryItem, StockStatus } from "@/lib/types";
@@ -76,6 +77,7 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       if (editing.mode === "new") await api.post(`/sellers/${sellerId}/items`, body);
       else if (editing.mode === "own") await api.put(`/sellers/${sellerId}/items/${editing.item.candy_id}`, body);
       else await api.put(`/sellers/${sellerId}/inventory/${editing.item.candy_id}`, body);
+      await refreshShopPages().catch(() => {});
       toast.success(editing.mode === "new" ? "Item added to your shop." : "Saved.");
       onSaved();
       onClose();
@@ -157,6 +159,7 @@ function RemoveDialog({ item, onClose, onRemoved }: { item: InventoryItem | null
     setBusy(true);
     try {
       await api.delete(`/sellers/${sellerId}/items/${item.candy_id}`);
+      await refreshShopPages().catch(() => {});
       toast.success("Item removed.");
       onRemoved();
       onClose();
@@ -208,7 +211,7 @@ export function InventoryManager() {
     setBusy(item.candy_id);
     try {
       await api.put(`/sellers/${sellerId}/inventory/${item.candy_id}`, body);
-      await reload();
+      await Promise.all([reload(), refreshShopPages().catch(() => {})]);
     } catch (e) {
       toast.error(errorText(e));
     } finally {

@@ -10,6 +10,7 @@ import { FormMessage, Panel } from "@/components/panel";
 import { errorText } from "@/lib/error-text";
 import { useSellerId, useSellerShop, useSetSellerShop } from "@/components/seller/seller-shop";
 import { ShopLogo } from "@/components/shop/shop-logo";
+import { refreshShopPages } from "@/app/actions/refresh-shops";
 import { api } from "@/lib/api";
 import { isHexColor } from "@/lib/format";
 import type { Seller, SellerTheme } from "@/lib/types";
@@ -125,6 +126,7 @@ export function StorefrontForm() {
     setError(null);
     try {
       setShop(await api.put<Seller>(`/sellers/${sellerId}/storefront`, body));
+      await refreshShopPages().catch(() => {});
       toast.success("Shop page saved.");
     } catch (e) {
       setError(errorText(e));
