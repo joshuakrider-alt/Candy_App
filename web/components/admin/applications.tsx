@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Panel } from "@/components/panel";
+import { refreshShopPages } from "@/app/actions/refresh-shops";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/error-text";
 import type { Seller, SellerConnect } from "@/lib/types";
@@ -45,6 +46,7 @@ export function Applications() {
     setBusy(seller.id);
     try {
       await api.put(`/applications/${seller.id}`, { status });
+      await refreshShopPages().catch(() => {});
       toast.success(status === "approved" ? `${seller.shop_name} is live.` : `${seller.shop_name} was turned down.`);
       setRejecting(null);
       await client.invalidateQueries({ queryKey: ["applications"] });
