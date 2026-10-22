@@ -70,6 +70,7 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       return;
     }
     let body: Record<string, unknown> = { on_hand_count: count, reserved_count: held, inventory_count: count - held };
+    if (item) body.seen_inventory_count = item.inventory_count;
     if (editing.mode !== "count") {
       const priceCents = toCents(String(data.get("price") ?? ""));
       if (priceCents === null) {
@@ -233,6 +234,7 @@ export function InventoryManager() {
           // At least 8 for sale, on top of any units held by open checkouts.
           on_hand_count: Math.max(8, item.inventory_count) + (item.reserved_count ?? 0),
           reserved_count: item.reserved_count ?? 0,
+          seen_inventory_count: item.inventory_count,
           inventory_count: Math.max(8, item.inventory_count),
         }
       : { status: "out-of-stock" };

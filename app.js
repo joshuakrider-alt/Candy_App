@@ -1532,6 +1532,7 @@ if (sellerApp) {
               price_cents: priceCents,
               on_hand_count: Number(stock),
               reserved_count: Number(card.dataset.reservedCount) || 0,
+              seen_inventory_count: Number(card.dataset.inventoryCount) || 0,
               // Read only by an API from before on_hand_count: the count for sale.
               inventory_count: Math.max(0, Number(stock) - (Number(card.dataset.reservedCount) || 0)),
             },
@@ -1541,6 +1542,8 @@ if (sellerApp) {
         loadSellerDashboard();
       } catch (error) {
         itemMessage.textContent = error.message || "That item could not be changed.";
+        // Stock changed meanwhile (409): reload so the next try starts from the new counts.
+        if (error.status === 409) loadSellerDashboard();
       }
       return;
     }
@@ -1555,6 +1558,7 @@ if (sellerApp) {
           on_hand_count:
             Math.max(8, Number(card.dataset.inventoryCount) || 0) + (Number(card.dataset.reservedCount) || 0),
           reserved_count: Number(card.dataset.reservedCount) || 0,
+          seen_inventory_count: Number(card.dataset.inventoryCount) || 0,
           // Read only by an API from before on_hand_count.
           inventory_count: Math.max(8, Number(card.dataset.inventoryCount) || 0),
         }
@@ -1571,6 +1575,7 @@ if (sellerApp) {
         "beforebegin",
         `<p class="order-message">${escapeHtml(error.message)}</p>`
       );
+      if (error.status === 409) loadSellerDashboard();
     }
   });
 

@@ -483,7 +483,7 @@ def register_routes(app):
         """
         return seller_inventory_lock_query(seller_id, [candy_id]).first()
 
-    def requested_available_count(data, values, seller_id, candy_id):
+    def requested_available_count(data, values, seller_id, candy_id, inventory):
         """The sellable count a seller's edit asks for, or None for no change.
 
         on_hand_count is the number on the shelf, so the units held by open
@@ -493,9 +493,11 @@ def register_routes(app):
         on_hand_count wins, so a dashboard can send both and work against an
         API from before on_hand_count. Call with the row locked.
 
-        A dashboard that sends reserved_count (the held units it showed) gets
-        a 409 when that has changed, for example a held checkout was paid
-        while the dialog was open, so a stale shelf count is never saved. A
+        A dashboard that sends reserved_count and seen_inventory_count (the
+        held and for-sale counts it showed) gets a 409 when either has
+        changed, for example a held checkout was paid while the dialog was
+        open, or paid and replaced by a new one of the same size, so a stale
+        shelf count is never saved. A
         shelf count below the held units is refused rather than clamped:
         clamping would forget the missing units, and a later release would
         put them back on sale.
@@ -504,7 +506,11 @@ def register_routes(app):
             return values.get("inventory_count")
         on_hand = parse_int(data["on_hand_count"], "on_hand_count")
         held = reserved_counts(seller_id, [candy_id]).get(candy_id, 0)
-        if "reserved_count" in data and parse_int(data["reserved_count"], "reserved_count") != held:
+        for_sale = (inventory.inventory_count or 0) if inventory is not None else 0
+        if ("reserved_count" in data and parse_int(data["reserved_count"], "reserved_count") != held) or (
+            "seen_inventory_count" in data
+            and parse_int(data["seen_inventory_count"], "seen_inventory_count") != for_sale
+        ):
             abort(
                 409,
                 description=(
@@ -1649,7 +1655,7 @@ def register_routes(app):
         for field in ("name", "description", "price_cents"):
             if field in values:
                 setattr(candy, field, values[field])
-        count = requested_available_count(data, values, seller_id, candy_id)
+        count = requested_available_count(data, values, seller_id, candy_id, inventory)
         if count is not None:
             inventory.inventory_count = count
             if inventory.inventory_count == 0:
@@ -1712,7 +1718,7 @@ def register_routes(app):
         values = {}
         if "inventory_count" in data:
             values["inventory_count"] = parse_int(data["inventory_count"], "inventory_count")
-        count = requested_available_count(data, values, seller_id, candy_id)
+        count = requested_available_count(data, values, seller_id, candy_id, inventory)
         status = None
         if "status" in data:
             status = data["status"]

@@ -939,6 +939,34 @@ def test_a_count_from_before_a_held_checkout_was_paid_is_refused(client, buyer, 
     assert saved.get_json()["inventory_count"] == 7
 
 
+def test_a_count_from_before_a_held_checkout_was_swapped_for_another_is_refused(
+    client, buyer, kiki_seller, fake_stripe
+):
+    """3 held are paid and a new checkout holds 3: the held total is unchanged."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    seen = seller_row(kiki_seller, seller_id, candy_id)
+
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+    assert buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()["payment_status"] == "paid"
+    place_order(buyer, seller_id, candy_id, quantity=3)
+    assert seller_row(kiki_seller, seller_id, candy_id)["reserved_count"] == seen["reserved_count"]
+
+    stale = kiki_seller.put(
+        url,
+        json={
+            "on_hand_count": seen["on_hand_count"],
+            "reserved_count": seen["reserved_count"],
+            "seen_inventory_count": seen["inventory_count"],
+        },
+    )
+    assert stale.status_code == 409
+    assert inventory_count(client, seller_id, candy_id) == 4
+
+
 def test_on_hand_count_wins_over_the_legacy_field(client, buyer, kiki_seller, fake_stripe):
     seller_id = kiki_seller.user["seller_id"]
     candy_id = first_in_stock_item(client, seller_id)["candy_id"]
