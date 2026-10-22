@@ -83,6 +83,8 @@ NEW_COLUMNS = (
     # 0 for every existing order: none was ever flagged, and a shortfall
     # cannot be worked out after the fact.
     ("order", "stock_shortfall", "INTEGER NOT NULL DEFAULT 0"),
+    # 0 everywhere: no seller has recorded a shelf count below the held units.
+    ("seller_inventory", "held_shortfall", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

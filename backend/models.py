@@ -369,6 +369,11 @@ class SellerInventory(db.Model):
     candy_id = db.Column(db.Integer, db.ForeignKey("candy.id"), nullable=False)
     inventory_count = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="out-of-stock")
+    # Units held by open checkouts that the seller says are not on the shelf
+    # (they counted fewer than were held). Never more than the units held.
+    # Releasing or paying for a held order uses these up first, so neither
+    # puts units that do not exist back up for sale.
+    held_shortfall = db.Column(db.Integer, nullable=False, default=0)
 
     seller = db.relationship("Seller", back_populates="inventory_items")
     candy = db.relationship("Candy", back_populates="seller_inventory")
@@ -382,6 +387,12 @@ class SellerInventory(db.Model):
             self.status = "low-stock"
         else:
             self.status = "in-stock"
+
+    def take_held_shortfall(self, quantity):
+        """Use up to `quantity` of the held shortfall; returns how much."""
+        taken = min(quantity, self.held_shortfall or 0)
+        self.held_shortfall = (self.held_shortfall or 0) - taken
+        return taken
 
     def to_dict(self):
         return {
@@ -427,6 +438,12 @@ class SellerPhoto(db.Model):
 
     seller = db.relationship("Seller", back_populates="photos")
     candy = db.relationship("Candy")
+
+    def take_held_shortfall(self, quantity):
+        """Use up to `quantity` of the held shortfall; returns how much."""
+        taken = min(quantity, self.held_shortfall or 0)
+        self.held_shortfall = (self.held_shortfall or 0) - taken
+        return taken
 
     def to_dict(self):
         return {

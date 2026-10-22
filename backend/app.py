@@ -335,13 +335,39 @@ def register_routes(app):
         }
 
     def release_order_inventory(order):
-        """Put an unpaid order's reserved units back on the shelf."""
+        """Put an unpaid order's reserved units back on the shelf.
+
+        Units the seller already said are missing (held_shortfall) are not
+        put back: they were never on the shelf.
+        """
         rows = locked_inventory_for(order)
         for item in order.items:
             inventory = rows.get(item.candy_id)
             if inventory:
-                inventory.apply_count_change(item.quantity)
+                missing = inventory.take_held_shortfall(item.quantity)
+                inventory.apply_count_change(item.quantity - missing)
         order.inventory_released_at = utcnow()
+
+    def settle_held_order_inventory(order):
+        """Record a paid order's share of units the seller said are missing.
+
+        Its units stay out of inventory_count either way. When the seller
+        counted fewer than were held, this order may be one that cannot be
+        filled, and that goes on the order as a shortfall.
+        """
+        rows = locked_inventory_for(order)
+        shortfall = 0
+        for item in order.items:
+            inventory = rows.get(item.candy_id)
+            if inventory:
+                shortfall += inventory.take_held_shortfall(item.quantity)
+        order.stock_shortfall = shortfall
+        if shortfall:
+            logger.warning(
+                "order %s was paid for units its seller says are not on the shelf; %s unit(s) short",
+                order.id,
+                shortfall,
+            )
 
     def reserve_order_inventory(order):
         """Take a paid order's units back off the shelf after a release.
@@ -444,7 +470,10 @@ def register_routes(app):
         for row in rows:
             data = row.to_dict()
             data["reserved_count"] = reserved.get(row.candy_id, 0)
-            data["on_hand_count"] = (row.inventory_count or 0) + data["reserved_count"]
+            data["held_shortfall"] = row.held_shortfall or 0
+            data["on_hand_count"] = max(
+                0, (row.inventory_count or 0) + data["reserved_count"] - data["held_shortfall"]
+            )
             payload.append(data)
         return payload
 
@@ -457,20 +486,28 @@ def register_routes(app):
         """
         return seller_inventory_lock_query(seller_id, [candy_id]).first()
 
-    def requested_available_count(data, values, seller_id, candy_id):
+    def requested_available_count(data, values, inventory):
         """The sellable count a seller's edit asks for, or None for no change.
 
         on_hand_count is the number on the shelf, so the units held by open
         checkouts are taken off it here; otherwise they would be counted twice
-        once the checkout is released. inventory_count is still accepted and
-        means the sellable count itself, as before; when both are sent,
-        on_hand_count wins, so a dashboard can send both and work against an
-        API from before on_hand_count. Call with the row locked.
+        once the checkout is released. A shelf count below the held units is
+        kept as the row's held_shortfall, so releasing or paying for those
+        checkouts cannot bring back units that do not exist. inventory_count
+        is still accepted and means the sellable count itself, as before; when
+        both are sent, on_hand_count wins, so a dashboard can send both and
+        work against an API from before on_hand_count. Call with the row
+        locked.
         """
         if "on_hand_count" in data:
             on_hand = parse_int(data["on_hand_count"], "on_hand_count")
-            held = reserved_counts(seller_id, [candy_id]).get(candy_id, 0)
+            held = reserved_counts(inventory.seller_id, [inventory.candy_id]).get(
+                inventory.candy_id, 0
+            )
+            inventory.held_shortfall = max(0, held - on_hand)
             return max(0, on_hand - held)
+        if "inventory_count" in values:
+            inventory.held_shortfall = 0
         return values.get("inventory_count")
 
     def unique_pickup_code():
@@ -561,6 +598,8 @@ def register_routes(app):
         # already returned them to the shelf.
         if order.inventory_released_at is not None:
             reserve_order_inventory(order)
+        else:
+            settle_held_order_inventory(order)
         db.session.commit()
         return True
 
@@ -1600,7 +1639,7 @@ def register_routes(app):
         for field in ("name", "description", "price_cents"):
             if field in values:
                 setattr(candy, field, values[field])
-        count = requested_available_count(data, values, seller_id, candy_id)
+        count = requested_available_count(data, values, inventory)
         if count is not None:
             inventory.inventory_count = count
             if inventory.inventory_count == 0:
@@ -1663,7 +1702,7 @@ def register_routes(app):
         values = {}
         if "inventory_count" in data:
             values["inventory_count"] = parse_int(data["inventory_count"], "inventory_count")
-        count = requested_available_count(data, values, seller_id, candy_id)
+        count = requested_available_count(data, values, inventory)
         status = None
         if "status" in data:
             status = data["status"]

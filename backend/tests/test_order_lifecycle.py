@@ -903,6 +903,60 @@ def test_a_shelf_count_below_the_held_units_leaves_nothing_for_sale(client, buye
     row = kiki_seller.put(url, json={"on_hand_count": 2}).get_json()
     assert row["inventory_count"] == 0
     assert row["status"] == "out-of-stock"
+    assert row["held_shortfall"] == 1
+    assert row["on_hand_count"] == 2
+
+
+def test_an_abandoned_checkout_does_not_bring_back_units_the_seller_does_not_have(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    """3 held, the seller counts 2. Releasing the 3 must leave 2 for sale, not 3."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    kiki_seller.put(url, json={"on_hand_count": 2})
+
+    let_the_sweep_release(app, client, order["id"])
+
+    assert inventory_count(client, seller_id, candy_id) == 2
+    row = seller_row(kiki_seller, seller_id, candy_id)
+    assert row["held_shortfall"] == 0
+    assert row["on_hand_count"] == 2
+
+
+def test_paying_for_units_the_seller_does_not_have_flags_the_order_short(
+    client, buyer, kiki_seller, fake_stripe
+):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    kiki_seller.put(url, json={"on_hand_count": 2})
+
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+    paid = buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()
+
+    assert paid["payment_status"] == "paid"
+    assert paid["stock_shortfall"] == 1
+    assert inventory_count(client, seller_id, candy_id) == 0
+    assert seller_row(kiki_seller, seller_id, candy_id)["held_shortfall"] == 0
+
+
+def test_a_later_shelf_count_replaces_the_held_shortfall(client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    place_order(buyer, seller_id, candy_id, quantity=3)
+    kiki_seller.put(url, json={"on_hand_count": 2})
+
+    # The seller finds the missing unit and recounts.
+    row = kiki_seller.put(url, json={"on_hand_count": 5}).get_json()
+    assert row["held_shortfall"] == 0
+    assert row["inventory_count"] == 2
 
 
 def test_on_hand_count_wins_over_the_legacy_field(client, buyer, kiki_seller, fake_stripe):

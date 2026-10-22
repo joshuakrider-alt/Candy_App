@@ -1363,6 +1363,11 @@ if (sellerApp) {
     }
   };
 
+  // The sellable count for a shelf count: what open checkouts hold is
+  // already sold, so it comes off the shelf number.
+  const sellableFromShelf = (card, shelf) =>
+    Math.max(0, shelf - (Number(card.dataset.reservedCount) || 0));
+
   const renderInventory = (inventory) => {
     inventoryGrid.innerHTML =
       inventory
@@ -1378,6 +1383,7 @@ if (sellerApp) {
               data-stock-status="${item.status}"
               data-inventory-count="${item.inventory_count}"
               data-on-hand-count="${item.on_hand_count ?? item.inventory_count}"
+              data-reserved-count="${item.reserved_count || 0}"
             >
               <div>
                 <p class="card-label">${owned ? "Your item" : "From platform catalog"}</p>
@@ -1389,7 +1395,11 @@ if (sellerApp) {
                   item.inventory_count
                 } left${
                   item.reserved_count
-                    ? ` · ${item.reserved_count} held in open checkouts`
+                    ? ` · ${item.reserved_count} held in open checkouts${
+                        item.held_shortfall
+                          ? ` (${item.held_shortfall} not on your shelf)`
+                          : ""
+                      }`
                     : ""
                 }</span>
                 <strong data-stock-label>${titleCase(item.status)}</strong>
@@ -1530,8 +1540,9 @@ if (sellerApp) {
               description,
               price_cents: priceCents,
               on_hand_count: Number(stock),
-              // Read only by an API from before on_hand_count.
-              inventory_count: Number(stock),
+              // Read only by an API from before on_hand_count, which takes
+              // the sellable count: the shelf minus what checkouts hold.
+              inventory_count: sellableFromShelf(card, Number(stock)),
             },
           });
         }
@@ -1551,7 +1562,10 @@ if (sellerApp) {
           status: "in-stock",
           on_hand_count: Math.max(8, Number(card.dataset.onHandCount) || 0),
           // Read only by an API from before on_hand_count.
-          inventory_count: Math.max(8, Number(card.dataset.inventoryCount) || 0),
+          inventory_count: sellableFromShelf(
+            card,
+            Math.max(8, Number(card.dataset.onHandCount) || 0)
+          ),
         }
       : { status: "out-of-stock" };
     try {

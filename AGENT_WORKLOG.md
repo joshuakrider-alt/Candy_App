@@ -431,9 +431,15 @@ DNS change; the Vercel connect half waits for the second project.
 - A payment that lands after the sweep released its stock, when that stock has
   since been sold, now records `order.stock_shortfall` (new column, boot
   migration, default 0) and logs a warning. The seller order queue shows it.
+- A shelf count below the units held is kept as
+  `seller_inventory.held_shortfall` (new column, boot migration, default 0).
+  Releasing a held checkout uses it up instead of re-adding missing units, and
+  paying for one marks the order short. (Codex review on PR #22.)
 - Known limit: marking an item "out" while a checkout holds units still lets
   those units come back if that checkout is abandoned.
-- Deploy order does not matter: the dashboard sends both fields.
+- Deploy order does not matter: the dashboard sends both fields, and the
+  legacy `inventory_count` it sends is the shelf count minus the held units, so
+  an API from before this change keeps the reservation too.
 
 ## Logging rule
 
