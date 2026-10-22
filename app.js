@@ -1363,10 +1363,15 @@ if (sellerApp) {
     }
   };
 
-  // The sellable count for a shelf count: what open checkouts hold is
-  // already sold, so it comes off the shelf number.
+  // The sellable count for a count of everything on hand: what open
+  // checkouts hold and what paid orders are waiting for is already sold.
   const sellableFromShelf = (card, shelf) =>
-    Math.max(0, shelf - (Number(card.dataset.reservedCount) || 0));
+    Math.max(
+      0,
+      shelf -
+        (Number(card.dataset.reservedCount) || 0) -
+        (Number(card.dataset.awaitingCount) || 0)
+    );
 
   const renderInventory = (inventory) => {
     inventoryGrid.innerHTML =
@@ -1384,6 +1389,7 @@ if (sellerApp) {
               data-inventory-count="${item.inventory_count}"
               data-on-hand-count="${item.on_hand_count ?? item.inventory_count}"
               data-reserved-count="${item.reserved_count || 0}"
+              data-awaiting-count="${item.awaiting_pickup_count || 0}"
             >
               <div>
                 <p class="card-label">${owned ? "Your item" : "From platform catalog"}</p>
@@ -1400,6 +1406,10 @@ if (sellerApp) {
                           ? ` (${item.held_shortfall} not on your shelf)`
                           : ""
                       }`
+                    : ""
+                }${
+                  item.awaiting_pickup_count
+                    ? ` · ${item.awaiting_pickup_count} waiting for pickup`
                     : ""
                 }</span>
                 <strong data-stock-label>${titleCase(item.status)}</strong>
@@ -1514,8 +1524,9 @@ if (sellerApp) {
             auth: true,
           });
         } else {
-          // The shelf count includes units held by open checkouts; the API
-          // takes those back off, so they are not counted twice.
+          // The count of everything on hand includes units held by open
+          // checkouts and paid orders; the API takes those back off, so they
+          // are not sold twice.
           const current = Number(card.dataset.onHandCount) || 0;
           const name = window.prompt("Item name", card.querySelector("h3").textContent);
           if (name === null) return;
@@ -1527,7 +1538,7 @@ if (sellerApp) {
           );
           if (description === null) return;
           const stock = window.prompt(
-            "How many are on your shelf? (Leave out ones packed for paid orders.)",
+            "How many do you have in total? (Include ones set aside for orders not picked up yet.)",
             String(current)
           );
           if (stock === null) return;

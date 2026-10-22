@@ -349,18 +349,27 @@ def register_routes(app):
         order.inventory_released_at = utcnow()
 
     def settle_held_order_inventory(order):
-        """Record a paid order's share of units the seller said are missing.
+        """Record whether a paid order got real units or some of the missing ones.
 
         Its units stay out of inventory_count either way. When the seller
-        counted fewer than were held, this order may be one that cannot be
-        filled, and that goes on the order as a shortfall.
+        counted fewer than were held (held_shortfall), the units that do exist
+        go to this paid order first; only what is still missing after that is
+        this order's shortfall, and the rest of the deficit stays with the
+        checkouts still open. Call after payment_status has left the open
+        states, so the held count below no longer includes this order.
         """
         rows = locked_inventory_for(order)
+        still_held = reserved_counts(order.seller_id, rows.keys())
         shortfall = 0
         for item in order.items:
             inventory = rows.get(item.candy_id)
-            if inventory:
-                shortfall += inventory.take_held_shortfall(item.quantity)
+            if not inventory or not inventory.held_shortfall:
+                continue
+            # Real units among everything that was held, this order included.
+            real = still_held.get(item.candy_id, 0) + item.quantity - inventory.held_shortfall
+            short = item.quantity - min(item.quantity, max(0, real))
+            inventory.held_shortfall -= short
+            shortfall += short
         order.stock_shortfall = shortfall
         if shortfall:
             logger.warning(
@@ -434,13 +443,21 @@ def register_routes(app):
             order.payment_status = "expired"
         db.session.commit()
 
-    def reserved_counts(seller_id, candy_ids):
-        """Units of each item held by this shop's open checkouts.
+    def held_order_filter():
+        """Orders whose units are held by a checkout that is still open."""
+        return (
+            Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
+            Order.inventory_released_at.is_(None),
+        )
 
-        Those units are already taken out of inventory_count but are still on
-        the seller's shelf, and they go back into inventory_count if the buyer
-        abandons the checkout.
-        """
+    def awaiting_pickup_filter():
+        """Paid orders not handed over yet: their units are still at the shop."""
+        return (
+            Order.payment_status.in_(FULFILLABLE_PAYMENT_STATUSES),
+            Order.status.in_(("new", "packing", "ready")),
+        )
+
+    def counts_by_candy(seller_id, candy_ids, order_filter):
         candy_ids = list(candy_ids)
         if not candy_ids:
             return {}
@@ -449,20 +466,32 @@ def register_routes(app):
             .join(Order, OrderItem.order_id == Order.id)
             .filter(
                 Order.seller_id == seller_id,
-                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
-                Order.inventory_released_at.is_(None),
                 OrderItem.candy_id.in_(candy_ids),
+                *order_filter,
             )
             .group_by(OrderItem.candy_id)
             .all()
         )
         return {candy_id: int(total or 0) for candy_id, total in rows}
 
-    def reserved_count_column():
-        """reserved_counts for each SellerInventory row, as a column.
+    def reserved_counts(seller_id, candy_ids):
+        """Units of each item held by this shop's open checkouts.
+
+        Those units are already taken out of inventory_count but are still on
+        the seller's shelf, and they go back into inventory_count if the buyer
+        abandons the checkout.
+        """
+        return counts_by_candy(seller_id, candy_ids, held_order_filter())
+
+    def awaiting_pickup_counts(seller_id, candy_ids):
+        """Units of each item in paid orders the buyer has not picked up."""
+        return counts_by_candy(seller_id, candy_ids, awaiting_pickup_filter())
+
+    def count_column(order_filter):
+        """counts_by_candy for each SellerInventory row, as a column.
 
         Selected in the same statement as the row, so the sellable count and
-        the held count come from one snapshot: a checkout committing between
+        the order counts come from one snapshot: a checkout committing between
         two separate reads could otherwise show a shelf count that never was.
         """
         return (
@@ -471,30 +500,39 @@ def register_routes(app):
             .filter(
                 Order.seller_id == SellerInventory.seller_id,
                 OrderItem.candy_id == SellerInventory.candy_id,
-                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
-                Order.inventory_released_at.is_(None),
+                *order_filter,
             )
             .correlate(SellerInventory)
             .scalar_subquery()
         )
 
-    def seller_inventory_payload(seller_id, rows, reserved=None):
+    def seller_inventory_payload(seller_id, rows, reserved=None, awaiting=None):
         """Inventory rows for the seller's own dashboard.
 
-        Adds reserved_count (held by open checkouts) and on_hand_count (what
-        should be on the shelf: for sale plus held), so a seller who counts the
-        shelf can type that number back as on_hand_count. Without `reserved`
-        the held counts are read here, so call it with the rows locked.
+        Adds reserved_count (held by open checkouts), awaiting_pickup_count
+        (in paid orders not picked up yet) and on_hand_count (everything that
+        should be at the shop: for sale, held and awaiting pickup, less any
+        held units the seller said are missing), so a seller who counts what
+        they have can type that number back as on_hand_count. Without the
+        counts they are read here, so call it with the rows locked.
         """
+        candy_ids = [row.candy_id for row in rows]
         if reserved is None:
-            reserved = reserved_counts(seller_id, [row.candy_id for row in rows])
+            reserved = reserved_counts(seller_id, candy_ids)
+        if awaiting is None:
+            awaiting = awaiting_pickup_counts(seller_id, candy_ids)
         payload = []
         for row in rows:
             data = row.to_dict()
             data["reserved_count"] = reserved.get(row.candy_id, 0)
+            data["awaiting_pickup_count"] = awaiting.get(row.candy_id, 0)
             data["held_shortfall"] = row.held_shortfall or 0
             data["on_hand_count"] = max(
-                0, (row.inventory_count or 0) + data["reserved_count"] - data["held_shortfall"]
+                0,
+                (row.inventory_count or 0)
+                + data["reserved_count"]
+                - data["held_shortfall"]
+                + data["awaiting_pickup_count"],
             )
             payload.append(data)
         return payload
@@ -511,10 +549,11 @@ def register_routes(app):
     def requested_available_count(data, values, inventory):
         """The sellable count a seller's edit asks for, or None for no change.
 
-        on_hand_count is the number on the shelf, so the units held by open
-        checkouts are taken off it here; otherwise they would be counted twice
-        once the checkout is released. A shelf count below the held units is
-        kept as the row's held_shortfall, so releasing or paying for those
+        on_hand_count is everything the seller has, so units held by open
+        checkouts and units in paid orders not yet picked up are taken off it
+        here; otherwise they would be sold twice. When the count is short of
+        those, the paid orders keep their units and the missing ones are kept
+        as the row's held_shortfall, so releasing or paying for the open
         checkouts cannot bring back units that do not exist. inventory_count
         is still accepted and means the sellable count itself, as before; when
         both are sent, on_hand_count wins, so a dashboard can send both and
@@ -523,13 +562,14 @@ def register_routes(app):
         """
         if "on_hand_count" in data:
             on_hand = parse_int(data["on_hand_count"], "on_hand_count")
-            held = reserved_counts(inventory.seller_id, [inventory.candy_id]).get(
-                inventory.candy_id, 0
-            )
-            inventory.held_shortfall = max(0, held - on_hand)
-            return max(0, on_hand - held)
-        if "inventory_count" in values:
-            inventory.held_shortfall = 0
+            ids = [inventory.candy_id]
+            held = reserved_counts(inventory.seller_id, ids).get(inventory.candy_id, 0)
+            awaiting = awaiting_pickup_counts(inventory.seller_id, ids).get(inventory.candy_id, 0)
+            committed = held + awaiting
+            inventory.held_shortfall = min(held, max(0, committed - on_hand))
+            return max(0, on_hand - committed)
+        # A legacy sellable count says nothing about the held units, so a
+        # known deficit among them is kept.
         return values.get("inventory_count")
 
     def unique_pickup_code():
@@ -1701,16 +1741,21 @@ def register_routes(app):
         Seller.query.get_or_404(seller_id)
         ensure_seller_inventory_rows(seller_id)
         results = (
-            db.session.query(SellerInventory, reserved_count_column())
+            db.session.query(
+                SellerInventory,
+                count_column(held_order_filter()),
+                count_column(awaiting_pickup_filter()),
+            )
             .filter(SellerInventory.seller_id == seller_id)
             .join(Candy, SellerInventory.candy_id == Candy.id)
             .filter(Candy.is_active.is_(True))
             .order_by(Candy.name)
             .all()
         )
-        inventory = [row for row, _ in results]
-        reserved = {row.candy_id: int(held or 0) for row, held in results}
-        return jsonify(seller_inventory_payload(seller_id, inventory, reserved))
+        inventory = [row for row, _, _ in results]
+        reserved = {row.candy_id: int(held or 0) for row, held, _ in results}
+        awaiting = {row.candy_id: int(paid or 0) for row, _, paid in results}
+        return jsonify(seller_inventory_payload(seller_id, inventory, reserved, awaiting))
 
     @app.route("/sellers/<int:seller_id>/inventory/<int:candy_id>", methods=["PUT"])
     @require_roles("seller", "admin")

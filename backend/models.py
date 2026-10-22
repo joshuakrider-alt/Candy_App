@@ -439,12 +439,6 @@ class SellerPhoto(db.Model):
     seller = db.relationship("Seller", back_populates="photos")
     candy = db.relationship("Candy")
 
-    def take_held_shortfall(self, quantity):
-        """Use up to `quantity` of the held shortfall; returns how much."""
-        taken = min(quantity, self.held_shortfall or 0)
-        self.held_shortfall = (self.held_shortfall or 0) - taken
-        return taken
-
     def to_dict(self):
         return {
             "id": self.id,

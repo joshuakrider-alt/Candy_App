@@ -1118,3 +1118,60 @@ def test_a_recount_after_refunding_a_short_order_puts_its_units_back_on_sale(
     assert row["reserved_count"] == 1
     assert row["inventory_count"] == 2
     assert other["payment_status"] == "pending"
+
+
+def test_units_in_paid_orders_not_picked_up_are_not_sold_again_on_a_recount(
+    client, buyer, kiki_seller, fake_stripe
+):
+    """10 at the shop, 3 paid for but not picked up. Counting 10 leaves 7 for sale."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    fake_stripe.mark_paid(fake_stripe.last_session_id)
+    assert buyer.post(f"/orders/{order['id']}/payment/confirm").get_json()["payment_status"] == "paid"
+
+    row = seller_row(kiki_seller, seller_id, candy_id)
+    assert row["awaiting_pickup_count"] == 3
+    assert row["on_hand_count"] == 10
+
+    saved = kiki_seller.put(url, json={"on_hand_count": 10}).get_json()
+    assert saved["inventory_count"] == 7
+
+
+def test_a_legacy_count_keeps_a_known_held_shortfall(app, client, buyer, kiki_seller, fake_stripe):
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 10})
+    order = place_order(buyer, seller_id, candy_id, quantity=3).get_json()
+    kiki_seller.put(url, json={"on_hand_count": 2})
+
+    kiki_seller.put(url, json={"inventory_count": 0})
+    assert seller_row(kiki_seller, seller_id, candy_id)["held_shortfall"] == 1
+
+    let_the_sweep_release(app, client, order["id"])
+    assert inventory_count(client, seller_id, candy_id) == 2
+
+
+def test_the_first_paid_checkout_gets_the_real_unit_and_the_deficit_stays_open(
+    app, client, buyer, kiki_seller, fake_stripe
+):
+    """Two one-unit checkouts, one unit at the shop. Whoever pays gets it."""
+    seller_id = kiki_seller.user["seller_id"]
+    candy_id = first_in_stock_item(client, seller_id)["candy_id"]
+    url = f"/sellers/{seller_id}/inventory/{candy_id}"
+    kiki_seller.put(url, json={"on_hand_count": 2})
+    first = place_order(buyer, seller_id, candy_id, quantity=1).get_json()
+    first_session = fake_stripe.last_session_id
+    second = place_order(buyer, seller_id, candy_id, quantity=1).get_json()
+    kiki_seller.put(url, json={"on_hand_count": 1})
+
+    fake_stripe.mark_paid(first_session)
+    paid = buyer.post(f"/orders/{first['id']}/payment/confirm").get_json()
+    assert paid["stock_shortfall"] == 0
+    assert seller_row(kiki_seller, seller_id, candy_id)["held_shortfall"] == 1
+
+    let_the_sweep_release(app, client, second["id"])
+    assert inventory_count(client, seller_id, candy_id) == 0

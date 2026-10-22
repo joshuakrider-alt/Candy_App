@@ -424,17 +424,23 @@ DNS change; the Vercel connect half waits for the second project.
   a checkout held units was inflated when that checkout was abandoned
   (10 on the shelf, 3 held, seller types 10, release makes it 13).
 - Both stock PUT routes now lock the shelf row (same lock as checkout and the
-  sweep). The seller dashboard sends `on_hand_count` (what is on the shelf);
-  the API subtracts units held by open checkouts. `inventory_count` alone keeps
-  its old meaning. Seller inventory responses add `reserved_count` and
-  `on_hand_count`.
+  sweep). The seller dashboard sends `on_hand_count` (everything the shop has,
+  including units set aside for paid orders not picked up yet); the API
+  subtracts units held by open checkouts and units in paid orders awaiting
+  pickup. `inventory_count` alone keeps its old meaning. Seller inventory
+  responses add `reserved_count`, `awaiting_pickup_count` and `on_hand_count`,
+  read in one statement with the row.
 - A payment that lands after the sweep released its stock, when that stock has
   since been sold, now records `order.stock_shortfall` (new column, boot
   migration, default 0) and logs a warning. The seller order queue shows it.
 - A shelf count below the units held is kept as
   `seller_inventory.held_shortfall` (new column, boot migration, default 0).
-  Releasing a held checkout uses it up instead of re-adding missing units, and
-  paying for one marks the order short. (Codex review on PR #22.)
+  Releasing a held checkout uses it up instead of re-adding missing units; a
+  held checkout that pays gets the real units first and is marked short only
+  for what is still missing. A legacy `inventory_count` update keeps it.
+  (Codex reviews on PR #22.)
+- Refunds still never return stock on their own; after refunding a short
+  order the seller's next count puts its untouched units back on sale.
 - Known limit: marking an item "out" while a checkout holds units still lets
   those units come back if that checkout is abandoned.
 - Deploy order does not matter: the dashboard sends both fields, and the
