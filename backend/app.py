@@ -12,6 +12,7 @@ from werkzeug.exceptions import HTTPException
 import accounts
 import connect
 import identity
+import messaging
 import payments
 import storage
 import storefront
@@ -201,6 +202,9 @@ def create_app(config_overrides=None):
     # has passed Stripe Identity before an admin can approve them.
     app.config["REQUIRE_SELLER_IDENTITY"] = _env_bool("REQUIRE_SELLER_IDENTITY", False)
 
+    # In-site messaging limits and the optional email notice (messaging.py).
+    messaging.configure(app, _env_int, _env_bool, os.environ)
+
     app.config["RUN_MIGRATIONS_ON_BOOT"] = True
 
     if config_overrides:
@@ -252,6 +256,7 @@ def create_app(config_overrides=None):
 
     register_error_handlers(app, jwt)
     register_routes(app)
+    app.register_blueprint(messaging.bp)
     return app
 
 

@@ -29,6 +29,9 @@ PLACEHOLDER_IDS = {
     "order_id": "1",
     "user_id": "1",
     "photo_id": "1",
+    "conversation_id": "1",
+    "message_id": "1",
+    "report_id": "1",
     "slug": "anything",
 }
 
@@ -74,6 +77,8 @@ ADMIN_ONLY = [
     ("PUT", "/admin/photos/1"),
     ("PUT", "/admin/sellers/1/profile-photo"),
     ("POST", "/admin/orders/1/refund"),
+    ("GET", "/admin/message-reports"),
+    ("PUT", "/admin/message-reports/1"),
     ("GET", "/applications"),
     ("PUT", "/applications/1"),
     ("GET", "/users"),
