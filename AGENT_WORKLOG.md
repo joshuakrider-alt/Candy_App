@@ -586,6 +586,32 @@ DNS change; the Vercel connect half waits for the second project.
   in date order. The 12 HTML files merged without conflict.
 - No Vercel, Render, Stripe or DNS settings changed. Cutover not started.
 
+## 2026-10-24 — Private seller pickup address (Claude Code)
+
+- Joshua's ask 1 before cutover: buyers only saw the neighborhood and pickup
+  hours after paying. Sellers now have a private `pickup_address` and
+  `pickup_note` (new nullable columns, added by the boot migration; existing
+  shops start empty, nothing guessed).
+- Who sees them: the shop's owner and admins, and a buyer only on an order
+  that is paid (same gate as the pickup code: `Order.pickup_dict`). Unpaid,
+  expired and refunded orders get `pickup: null`. Public routes (`/sellers`,
+  `/shops`, `/shops/<slug>`, storefront) are unchanged and tested not to
+  contain them.
+- Web: asked for in the shop application (address required in the form,
+  optional in the API so older clients still apply), editable on a new
+  seller page `/seller/pickup`, a dashboard prompt for shops without one,
+  shown on the checkout return page, the order card and a new receipt page
+  `/account/orders/<id>`. Admin applications list shows it.
+- Demo seed: Ms. Kiki's gets a fake address; Northview stays empty (a shop
+  from before this change).
+- Codex finding, fixed: the browser's query cache survived sign-out, so a
+  second account in the same tab could be shown the first one's cached
+  receipt (address included). Every sign-in, sign-up and sign-out now drops
+  all cached data except the session (`useRefreshSession`), with a browser
+  test that switches accounts without reloading.
+- API tests: 274 passed, 8 skipped (SQLite). Browser tests: 110 passed.
+- No Vercel, Render, DNS or production changes. Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

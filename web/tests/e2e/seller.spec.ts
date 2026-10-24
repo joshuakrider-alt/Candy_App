@@ -43,6 +43,8 @@ test("a new seller applies, is signed in, and sees the shop is waiting for appro
   await page.getByLabel("Your name").fill("Tess Tester");
   await page.getByLabel("Neighborhood").fill("Riverside");
   await page.getByLabel("Pickup times").fill("Saturdays, 10 AM to 2 PM");
+  await page.getByLabel("Pickup address").fill("12 Test Lane");
+  await page.getByLabel("Pickup note (optional)").fill("Blue door");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password (at least 8 characters)").fill("tester-password");
   await page.getByLabel("Type it again").fill("tester-password");
@@ -52,6 +54,8 @@ test("a new seller applies, is signed in, and sees the shop is waiting for appro
   await expect(page.getByRole("heading", { name: "Test Treat Stand" })).toBeVisible();
   await expect(page.getByText("Your shop is waiting for approval")).toBeVisible();
   await expect(page.getByText("No paid orders waiting")).toBeVisible();
+  // The address came in with the application, so there is nothing to prompt for.
+  await expect(page.getByText("Buyers can't see where to collect")).toHaveCount(0);
 
   await page.getByRole("link", { name: "Stock and items" }).click();
   await expect(page.getByRole("button", { name: "Add your own item" })).toBeDisabled();
@@ -63,6 +67,7 @@ test("the application form checks the passwords match", async ({ page }) => {
   await page.getByLabel("Your name").fill("Tess");
   await page.getByLabel("Neighborhood").fill("Riverside");
   await page.getByLabel("Pickup times").fill("Weekends");
+  await page.getByLabel("Pickup address").fill("1 Mismatch Rd");
   await page.getByLabel("Email").fill("mismatch@example.com");
   await page.getByLabel("Password (at least 8 characters)").fill("tester-password");
   await page.getByLabel("Type it again").fill("other-password");
@@ -209,6 +214,39 @@ test("the shop page form previews as you type and saves", async ({ page }) => {
   await page.getByLabel(/^Tagline/).fill(original);
   await page.getByRole("button", { name: "Save shop page" }).click();
   await expect(page.getByText("Shop page saved.")).toBeVisible();
+});
+
+test("a shop with no pickup address is prompted, and saving it keeps it off the public page", async ({ page }) => {
+  // Jordan's seeded shop predates pickup addresses, like the shops on beta.
+  await signIn(page, "seller", "/seller");
+  await expect(page).toHaveURL("/seller");
+  const prompt = page.getByText("Buyers can't see where to collect");
+  await expect(prompt).toBeVisible();
+  await page.getByRole("link", { name: "Add your pickup address" }).click();
+  await expect(page).toHaveURL("/seller/pickup");
+
+  await page.getByLabel("Pickup address").fill("77 North View Rd\nUnit B");
+  await page.getByLabel(/^Pickup note/).fill("Knock on the garage");
+  await page.getByRole("button", { name: "Save pickup details" }).click();
+  await expect(page.getByText("Pickup details saved.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Pickup address")).toHaveValue("77 North View Rd\nUnit B");
+  await page.getByRole("link", { name: "Pickup queue" }).click();
+  await expect(prompt).toHaveCount(0);
+
+  const shop = await page.request.get("/api/flask/shops/northview-snack-stop");
+  expect(await shop.text()).not.toContain("North View Rd");
+  await page.goto("/s/northview-snack-stop");
+  await expect(page.getByText("Northview").first()).toBeVisible();
+  await expect(page.getByText("North View Rd")).toHaveCount(0);
+
+  // Undo, so the other device's run starts from a shop without an address.
+  const origin = new URL(page.url()).origin;
+  const undo = await page.request.put("/api/flask/sellers/2/pickup", {
+    data: { pickup_address: null, pickup_note: null },
+    headers: { origin },
+  });
+  expect(undo.ok()).toBe(true);
 });
 
 test("Stripe's returns to the old seller page land on payouts and ID check", async ({ page }) => {

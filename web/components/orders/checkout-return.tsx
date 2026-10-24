@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Clock, MapPin } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OrderItems } from "@/components/orders/order-summary";
 import { PickupCode } from "@/components/orders/pickup-code";
+import { PickupPlace } from "@/components/orders/pickup-place";
 import { finishPaying, releaseItems, sentence } from "@/components/orders/use-order-actions";
 import { ApiRequestError, api } from "@/lib/api";
 import type { Order } from "@/lib/types";
@@ -141,24 +141,22 @@ export function CheckoutReturn({ params }: { params: Params }) {
             <h1 className="mt-1 text-3xl font-extrabold text-cola">Show this code at pickup</h1>
           </div>
           {view.order.pickup_code && <PickupCode code={view.order.pickup_code} />}
-          {view.order.seller && (
-            <div className="flex flex-col gap-1 rounded-md bg-muted p-4 text-cola">
-              <p className="font-heading text-xl font-bold">{view.order.seller.shop_name}</p>
-              <p className="flex items-center gap-1.5 text-sm">
-                <MapPin aria-hidden className="size-4" /> {view.order.seller.neighborhood}
-              </p>
-              <p className="flex items-center gap-1.5 text-sm">
-                <Clock aria-hidden className="size-4" /> {view.order.seller.pickup_window}
-              </p>
-            </div>
-          )}
+          <PickupPlace order={view.order} />
           <OrderItems order={view.order} />
           <p className="text-sm text-muted-foreground">
             Order #{view.order.id}. Wait until the shop marks it ready; you can follow it in your orders.
           </p>
-          <Link href="/account/orders" className={buttonVariants({ className: "h-11 rounded-full font-extrabold" })}>
-            See your orders
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/account/orders" className={buttonVariants({ className: "h-11 rounded-full px-6 font-extrabold" })}>
+              See your orders
+            </Link>
+            <Link
+              href={`/account/orders/${view.order.id}`}
+              className={buttonVariants({ variant: "outline", className: "h-11 rounded-full px-6 font-extrabold" })}
+            >
+              Receipt
+            </Link>
+          </div>
         </>
       )}
 

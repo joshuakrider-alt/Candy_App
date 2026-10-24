@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { Panel } from "@/components/panel";
+import { PickupDetailsPrompt } from "@/components/seller/pickup-details-prompt";
 import { SellerShopProvider } from "@/components/seller/seller-shop";
 import { getSession } from "@/lib/session";
 
@@ -61,6 +62,7 @@ export default async function SellerLayout({ children }: { children: React.React
               : "This shop was not approved. Contact us at the address on the contact page if you think that's a mistake."}
           </p>
         )}
+        <PickupDetailsPrompt />
         <div className="grid gap-6 md:grid-cols-[13rem_1fr]">
           <DashboardNav area="seller" />
           <div className="flex min-w-0 flex-col gap-5">{children}</div>

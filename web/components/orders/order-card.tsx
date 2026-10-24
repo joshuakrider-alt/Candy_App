@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { OrderItems } from "@/components/orders/order-summary";
 import { STEPS, canFinishPaying, orderStatusLine, stepIndex } from "@/components/orders/order-status";
 import { PickupCode } from "@/components/orders/pickup-code";
+import { PickupPlace } from "@/components/orders/pickup-place";
 import type { Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -68,8 +69,16 @@ export function OrderCard({
           Ready at {order.seller.shop_name}, {order.seller.pickup_window}.
         </p>
       )}
+      {/* The street address only arrives once the order is paid. */}
+      {order.pickup_code && order.status !== "completed" && <PickupPlace order={order} className="p-3" />}
 
       <OrderItems order={order} />
+
+      {order.pickup_code && (
+        <Link href={`/account/orders/${order.id}`} className="self-start text-sm font-bold text-cherry-deep underline">
+          View receipt
+        </Link>
+      )}
 
       {canFinishPaying(order) && (
         <div className="flex flex-wrap gap-2">

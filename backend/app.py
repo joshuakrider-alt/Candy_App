@@ -32,6 +32,8 @@ from models import (
     INVENTORY_STATUSES,
     ORDER_STATUSES,
     PHOTO_STATUSES,
+    PICKUP_ADDRESS_MAX_LENGTH,
+    PICKUP_NOTE_MAX_LENGTH,
     Candy,
     Order,
     OrderItem,
@@ -82,6 +84,26 @@ def parse_int(value, field, minimum=0):
     if number < minimum:
         abort(400, description=problem)
     return number
+
+
+def parse_pickup_text(value, field, max_length):
+    """A pickup address or note from JSON: trimmed text, or None when blank.
+
+    Line breaks are kept (an address is often two lines) but blank lines and
+    stray spaces are dropped, and other control characters are refused so the
+    text prints cleanly on a receipt.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        abort(400, description=f"{field} must be text")
+    lines = [" ".join(line.split()) for line in value.replace("\r\n", "\n").split("\n")]
+    text = "\n".join(line for line in lines if line)
+    if any(ord(char) < 32 and char != "\n" for char in text):
+        abort(400, description=f"{field} contains characters that are not allowed")
+    if len(text) > max_length:
+        abort(400, description=f"{field} must be {max_length} characters or fewer")
+    return text or None
 
 
 def stock_status_for(count):
@@ -624,6 +646,9 @@ def register_routes(app):
     def order_response(order, checkout_url=None):
         payload = order.to_dict()
         payload["seller"] = order.seller.to_dict() if order.seller else None
+        # Every caller has already passed assert_order_access (or is an admin
+        # list), and pickup_dict itself stays None until the order is paid.
+        payload["pickup"] = order.pickup_dict()
         if checkout_url:
             payload["checkout_url"] = checkout_url
         return payload
@@ -949,6 +974,14 @@ def register_routes(app):
             contact_email=email,
             neighborhood=data["neighborhood"].strip(),
             pickup_window=data["pickup_window"].strip(),
+            # Optional here so an older client that does not send them can
+            # still apply; the dashboard keeps asking until they are filled.
+            pickup_address=parse_pickup_text(
+                data.get("pickup_address"), "pickup_address", PICKUP_ADDRESS_MAX_LENGTH
+            ),
+            pickup_note=parse_pickup_text(
+                data.get("pickup_note"), "pickup_note", PICKUP_NOTE_MAX_LENGTH
+            ),
             status="pending",
         )
         db.session.add(seller)
@@ -1019,6 +1052,29 @@ def register_routes(app):
         db.session.commit()
         if status == "approved":
             ensure_seller_inventory_rows(seller.id)
+        return jsonify(seller.to_dict(include_contact_email=True))
+
+    @app.route("/sellers/<int:seller_id>/pickup", methods=["PUT"])
+    @require_roles("seller", "admin")
+    def update_pickup_details(seller_id):
+        """Set the shop's private pickup address and door note.
+
+        Partial update, like the storefront settings: only fields present in
+        the body change, and null or "" clears one. Kept off the storefront
+        route on purpose, because everything that route saves is public.
+        """
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        data = request.get_json() or {}
+        if "pickup_address" in data:
+            seller.pickup_address = parse_pickup_text(
+                data.get("pickup_address"), "pickup_address", PICKUP_ADDRESS_MAX_LENGTH
+            )
+        if "pickup_note" in data:
+            seller.pickup_note = parse_pickup_text(
+                data.get("pickup_note"), "pickup_note", PICKUP_NOTE_MAX_LENGTH
+            )
+        db.session.commit()
         return jsonify(seller.to_dict(include_contact_email=True))
 
     # ------------------------------------------------------------------
