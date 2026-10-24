@@ -41,3 +41,23 @@ test("the sign-in page runs its scripts under the nonce policy", async ({ page }
   await expect(page.getByRole("button", { name: "Sign in" })).toBeEnabled();
   expect(blocked).toEqual([]);
 });
+
+// One footer on every page group: store pages, sign-in pages and the bare 404.
+for (const path of ["/", "/shops", "/login", "/signup", "/no-such-page"]) {
+  test(`${path} has the footer with the Google Play badge`, async ({ page }) => {
+    await page.goto(path);
+    const footer = page.getByRole("contentinfo");
+    const badge = footer.getByRole("link", { name: "Get it on Google Play" });
+    await expect(badge).toHaveAttribute(
+      "href",
+      "https://play.google.com/store/apps/details?id=com.neighborhoodcandylady.app",
+    );
+    await badge.scrollIntoViewIfNeeded();
+    const img = badge.getByRole("img");
+    await expect(img).toBeVisible();
+    expect(await img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+    // Google's badge rules ask for the trademark credit wherever the badge is used.
+    await expect(footer.getByText("Google Play and the Google Play logo are trademarks of Google LLC.")).toBeVisible();
+    await expect(footer.getByRole("link", { name: "FAQ" })).toBeVisible();
+  });
+}

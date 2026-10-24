@@ -586,6 +586,24 @@ DNS change; the Vercel connect half waits for the second project.
   in date order. The 12 HTML files merged without conflict.
 - No Vercel, Render, Stripe or DNS settings changed. Cutover not started.
 
+## 2026-10-24 — Footer with a "Get it on Google Play" badge (Claude Code)
+
+- The web/ footer now carries Google's "Get it on Google Play" badge,
+  linking to https://play.google.com/store/apps/details?id=com.neighborhoodcandylady.app,
+  next to the existing footer links, plus the trademark line Google's badge
+  rules ask for ("Google Play and the Google Play logo are trademarks of
+  Google LLC."). Badge is 48px tall with at least a quarter of its height
+  clear around it, artwork unchanged.
+- The footer was only on the store pages. It is now also on /login,
+  /signup and the bare 404 page, so every web/ page has it.
+- Badge served from web/public/badges/google-play-en.svg (no request to
+  Google). play.google.com and Google's partner site are blocked from this
+  container, so the file came from the npm package @mynameiskazim/storebadge
+  (googleplay-en.svg), which is Google's current badge export. Swap in the
+  file from Google's badge page if wanted; same name, nothing else changes.
+- Browser tests: 112 passed (10 new). Lint, typecheck and build clean.
+- No Vercel, Render, DNS or production settings changed. Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
