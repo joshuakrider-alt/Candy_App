@@ -299,9 +299,13 @@ def mark_read(user, conversation, up_to=None):
     if up_to is not None:
         latest_query = latest_query.filter(Message.id <= up_to)
     latest = latest_query.scalar() or 0
-    row = ConversationRead.query.filter_by(
-        conversation_id=conversation.id, user_id=user.id
-    ).first()
+    # Locked so two tabs acknowledging at once take turns, and the max below
+    # never lets an older acknowledgment overwrite a newer one.
+    row = (
+        ConversationRead.query.filter_by(conversation_id=conversation.id, user_id=user.id)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         row = ConversationRead(conversation_id=conversation.id, user_id=user.id)
         db.session.add(row)
@@ -323,11 +327,34 @@ def message_dict(message, me):
     }
 
 
-def conversation_dict(conversation, user, unread=0, include_messages=False):
+def latest_messages(conversation_ids):
+    """{conversation id: its newest Message}, in two queries for the whole page."""
+    if not conversation_ids:
+        return {}
+    newest_ids = (
+        db.session.query(func.max(Message.id))
+        .filter(Message.conversation_id.in_(conversation_ids))
+        .group_by(Message.conversation_id)
+    )
+    return {
+        m.conversation_id: m for m in Message.query.filter(Message.id.in_(newest_ids)).all()
+    }
+
+
+def conversation_dict(conversation, user, unread=0, include_messages=False, last=None):
+    """`last` is the newest message when the caller already fetched it (the
+    inbox does, for a whole page at once); otherwise it is loaded here."""
     me = party_of(user)
     others = other_parties(conversation, me)
     other = others[0] if others else None
-    last = conversation.messages[-1] if conversation.messages else None
+    if include_messages:
+        last = conversation.messages[-1] if conversation.messages else None
+    elif last is None:
+        last = (
+            Message.query.filter_by(conversation_id=conversation.id)
+            .order_by(Message.id.desc())
+            .first()
+        )
     data = {
         "id": conversation.id,
         "kind": conversation.kind,
@@ -528,11 +555,13 @@ def list_conversations():
         .limit(CONVERSATION_PAGE_SIZE + 1)
         .all()
     )
+    page = rows[:CONVERSATION_PAGE_SIZE]
     unread = unread_by_conversation(user)
+    latest = latest_messages([c.id for c in page])
     return jsonify(
         conversations=[
-            conversation_dict(c, user, unread.get(c.id, 0))
-            for c in rows[:CONVERSATION_PAGE_SIZE]
+            conversation_dict(c, user, unread.get(c.id, 0), last=latest.get(c.id))
+            for c in page
         ],
         next_offset=offset + CONVERSATION_PAGE_SIZE
         if len(rows) > CONVERSATION_PAGE_SIZE

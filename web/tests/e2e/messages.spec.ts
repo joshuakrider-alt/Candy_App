@@ -13,7 +13,9 @@ test("a buyer writes to support and an admin answers", async ({ page, browser })
   await page.getByLabel("Message", { exact: true }).fill("Which door do I knock on?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page).toHaveURL(/\/account\/messages\/\d+$/);
-  await expect(page.getByText("Which door do I knock on?")).toBeVisible();
+  const thread = page.url();
+  // Scoped to the thread: inbox previews of earlier runs repeat these words.
+  await expect(page.getByRole("list", { name: "Messages" }).getByText("Which door do I knock on?")).toBeVisible();
   // Support threads cannot be blocked.
   await expect(page.getByRole("button", { name: "Block" })).toHaveCount(0);
 
@@ -22,13 +24,16 @@ test("a buyer writes to support and an admin answers", async ({ page, browser })
   await expect(admin).toHaveURL("/admin/messages");
   await expect(admin.getByRole("link", { name: /^Messages, \d+ unread$/ })).toBeVisible();
   await admin.getByRole("link", { name: new RegExp(`^${subject} with Alice Carter, 1 unread$`) }).click();
-  await expect(admin.getByText("Which door do I knock on?")).toBeVisible();
+  await expect(admin).toHaveURL(/\/admin\/messages\/\d+$/);
+  await expect(admin.getByRole("list", { name: "Messages" }).getByText("Which door do I knock on?")).toBeVisible();
   await admin.getByLabel("Reply").fill("The side door. See you soon!");
   await admin.getByRole("button", { name: "Send" }).click();
-  await expect(admin.getByText("The side door. See you soon!")).toBeVisible();
+  await expect(admin.getByRole("list", { name: "Messages" }).getByText("The side door. See you soon!")).toBeVisible();
 
   await page.goto("/account/messages");
   await page.getByRole("link", { name: new RegExp(`^${subject} with Candy Lady support, 1 unread$`) }).click();
-  await expect(page.getByText("The side door. See you soon!")).toBeVisible();
-  await expect(page.getByText("Candy Lady support ·")).toBeVisible();
+  await expect(page).toHaveURL(thread);
+  const messages = page.getByRole("list", { name: "Messages" });
+  await expect(messages.getByText("The side door. See you soon!")).toBeVisible();
+  await expect(messages.getByText("Candy Lady support ·")).toBeVisible();
 });

@@ -589,8 +589,9 @@ DNS change; the Vercel connect half waits for the second project.
   production settings changed.
 - Codex review fixes in the same PR: messaging caches keyed by the signed-in
   login, rate-limit checks serialized per login (row lock), read marker stops
-  at the newest message the browser showed, inbox pages 50 at a time.
-- API tests: 278 passed, 8 skipped (SQLite). Browser tests: 104 passed.
+  at the newest message the browser showed (and is updated under a row
+  lock), inbox pages 50 at a time with previews fetched in one query.
+- API tests: 279 passed, 8 skipped (SQLite). Browser tests: 104 passed.
 
 ## Logging rule
 

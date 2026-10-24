@@ -313,3 +313,13 @@ def test_the_mailer_stays_off_until_fully_configured():
     )
     # Off means nothing is attempted at all.
     assert mailer.send_email({}, "someone@example.com", "s", "t") is False
+
+
+def test_the_inbox_preview_is_each_threads_newest_message(buyer, kiki_seller, admin):
+    first = support(buyer, body="first thread").get_json()
+    second = support(kiki_seller, body="second thread").get_json()
+    admin.post(f"/conversations/{first['id']}/messages", json={"body": "newest reply"})
+    previews = {c["id"]: c["last_message"] for c in admin.get("/conversations").get_json()["conversations"]}
+    assert previews[first["id"]]["preview"] == "newest reply"
+    assert previews[first["id"]]["from_me"] is True
+    assert previews[second["id"]]["preview"] == "second thread"
