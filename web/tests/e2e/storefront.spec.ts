@@ -25,6 +25,13 @@ test("a shop page's HTML has its name and products before any script runs", asyn
   expect(html).toContain("Ms. Kiki&#x27;s Snack Spot");
   expect(html).toContain("Sour Gummy Mix");
   expect(html).toContain("<title>Ms. Kiki&#x27;s Snack Spot | The Candy Lady</title>");
+  // The seeded shop has a private pickup address; the public page only names the neighborhood.
+  expect(html).toContain("Cherry Hill");
+  expect(html).not.toContain("100 Example Ave");
+  expect(html).not.toContain("Ring the side door");
+  for (const path of ["/shops", "/"]) {
+    expect(await (await request.get(path)).text()).not.toContain("100 Example Ave");
+  }
 });
 
 test("home and /shops list the open shops", async ({ page }) => {

@@ -39,6 +39,10 @@ SELLERS = (
         "contact_email": "kiki@example.com",
         "neighborhood": "Cherry Hill",
         "pickup_window": "Weekdays, 2:30 PM - 7:00 PM",
+        # Demo only. Northview is left without one, like a shop that applied
+        # before pickup addresses existed.
+        "pickup_address": "100 Example Ave, Cherry Hill",
+        "pickup_note": "Ring the side door",
         "status": "approved",
         "stock": {
             "Sour Gummy Mix": 24,
@@ -130,6 +134,8 @@ def seed_demo_data(verbose=True):
                 contact_email=spec["contact_email"],
                 neighborhood=spec["neighborhood"],
                 pickup_window=spec["pickup_window"],
+                pickup_address=spec.get("pickup_address"),
+                pickup_note=spec.get("pickup_note"),
                 status=spec["status"],
             )
             db.session.add(seller)

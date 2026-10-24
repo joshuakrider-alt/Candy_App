@@ -93,6 +93,10 @@ export function Applications() {
                   <p>
                     {seller.neighborhood} · {seller.pickup_window}
                   </p>
+                  <p className="whitespace-pre-line">
+                    Pickup: {seller.pickup_address ?? "no address yet"}
+                    {seller.pickup_note ? ` (${seller.pickup_note})` : ""}
+                  </p>
                   <p>
                     {seller.contact_name} · {seller.contact_email ?? "no email"}
                   </p>
