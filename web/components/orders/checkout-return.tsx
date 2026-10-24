@@ -12,6 +12,7 @@ import { ApiRequestError, api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { useSession } from "@/lib/use-session";
 import { useCart } from "@/store/cart";
+import { ShopTitle } from "@/components/shop/shop-title";
 
 type Params = { order?: string; session_id?: string; payment?: string; shop?: string };
 
@@ -143,6 +144,7 @@ export function CheckoutReturn({ params }: { params: Params }) {
           {view.order.pickup_code && <PickupCode code={view.order.pickup_code} />}
           {view.order.seller && (
             <div className="flex flex-col gap-1 rounded-md bg-muted p-4 text-cola">
+              <ShopTitle title={view.order.seller.shop_title} className="self-start" />
               <p className="font-heading text-xl font-bold">{view.order.seller.shop_name}</p>
               <p className="flex items-center gap-1.5 text-sm">
                 <MapPin aria-hidden className="size-4" /> {view.order.seller.neighborhood}

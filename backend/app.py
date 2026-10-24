@@ -942,9 +942,18 @@ def register_routes(app):
         password = validate_password(data.get("password"))
         if User.query.filter_by(email=email).first():
             abort(409, description="an account with that email already exists")
+        # Optional: onboarding preselects "Candy Shop", and an older client
+        # that never sends the field gets the same.
+        shop_title = storefront.DEFAULT_SHOP_TITLE
+        if data.get("shop_title") is not None:
+            try:
+                shop_title = storefront.normalize_shop_title(data.get("shop_title"))
+            except ValueError as error:
+                abort(400, description=f"shop_title: {error}")
 
         seller = Seller(
             shop_name=data["shop_name"].strip(),
+            shop_title=shop_title,
             contact_name=data["contact_name"].strip(),
             contact_email=email,
             neighborhood=data["neighborhood"].strip(),
@@ -1462,6 +1471,7 @@ def register_routes(app):
                     "slug": seller.slug,
                     "storefront_path": seller.storefront_path,
                     "shop_name": seller.shop_name,
+                    "shop_title": seller.shop_title,
                     "tagline": seller.tagline,
                     "neighborhood": seller.neighborhood,
                     "pickup_window": seller.pickup_window,
@@ -1526,7 +1536,7 @@ def register_routes(app):
     @app.route("/sellers/<int:seller_id>/storefront", methods=["PUT"])
     @require_roles("seller", "admin")
     def update_storefront_settings(seller_id):
-        """Edit the shop's public identity: slug, tagline, logo, theme.
+        """Edit the shop's public identity: slug, title, tagline, logo, theme.
 
         Partial update: only fields present in the body change, and sending
         null or "" clears an optional field. The slug cannot be cleared once
@@ -1544,6 +1554,12 @@ def register_routes(app):
             if slug_taken(slug, seller.id):
                 abort(409, description="that address is already taken")
             seller.slug = slug
+
+        if "shop_title" in data:
+            try:
+                seller.shop_title = storefront.normalize_shop_title(data.get("shop_title"))
+            except ValueError as error:
+                abort(400, description=f"shop_title: {error}")
 
         if "tagline" in data:
             tagline = str(data.get("tagline") or "").strip()

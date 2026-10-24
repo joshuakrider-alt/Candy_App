@@ -60,6 +60,8 @@ export type SellerPhoto = {
 export type Seller = {
   id: number;
   shop_name: string;
+  /** How the shop is labeled: "Candy Lady", "Candy Shop", or the seller's own words. */
+  shop_title: string;
   contact_name: string;
   neighborhood: string;
   pickup_window: string;

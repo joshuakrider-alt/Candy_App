@@ -291,6 +291,15 @@ Seller fields (all optional or defaulted, added by boot migrations):
   CSS on a public page). The API also returns `on_primary`/`on_accent`, a
   black-or-white text colour picked for contrast.
 - `logo_url` — `https://` only. No upload pipeline yet.
+- `shop_title` — how the shop is labeled on its page, `/shops`, orders and
+  messages: `Candy Lady`, `Candy Woman`, `Candy Guy`, `Candy Man`,
+  `Candy Shop`, or the seller's own 2–24 characters (letters, numbers,
+  spaces, `' & . -`; a basic word filter, see `storefront.normalize_shop_title`).
+  It is only a title; nothing asks for a seller's gender. `POST /applications`
+  takes it optionally (default `Candy Shop`); `PUT /sellers/<id>/storefront`
+  changes it and refuses a blank. The column's database default is
+  `Candy Lady`, so shops from before the column keep that label and the
+  previous release can still insert shops after a rollback.
 
 `PUT /sellers/<id>/storefront` (owner or admin) edits them; send `null`/`""`
 to clear an optional one.
@@ -339,7 +348,7 @@ Signed in:
 - `GET /orders/<id>`
 - `POST /orders`, `POST /orders/<id>/checkout`, `POST /orders/<id>/payment/confirm`, `POST /orders/<id>/cancel` (buyer)
 - `GET /sellers/<id>/inventory`, `PUT /sellers/<id>/inventory/<candy_id>`, `GET /sellers/<id>/orders`, `PUT /orders/<id>/status` (that shop's seller, or admin)
-- `PUT /sellers/<id>/storefront` — slug, tagline, theme, logo (that shop's seller, or admin)
+- `PUT /sellers/<id>/storefront` — slug, shop title, tagline, theme, logo (that shop's seller, or admin)
 - `POST /sellers/<id>/stripe/connect`, `GET /sellers/<id>/stripe/status`, `POST /sellers/<id>/stripe/dashboard` — Connect onboarding, status refresh, Express dashboard link (that shop's seller, or admin)
 
 Admin only:

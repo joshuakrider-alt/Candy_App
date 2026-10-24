@@ -5,6 +5,7 @@ import { DashboardNav } from "@/components/dashboard-nav";
 import { Panel } from "@/components/panel";
 import { SellerShopProvider } from "@/components/seller/seller-shop";
 import { getSession } from "@/lib/session";
+import { ShopTitle } from "@/components/shop/shop-title";
 
 export const metadata: Metadata = { title: { template: "%s · Seller", default: "Seller" }, robots: { index: false } };
 
@@ -46,6 +47,7 @@ export default async function SellerLayout({ children }: { children: React.React
         <div>
           <p className="font-bold text-cherry-deep">Seller dashboard</p>
           <h1 className="text-4xl font-extrabold text-cola">{seller.shop_name}</h1>
+          <ShopTitle title={seller.shop_title} className="mt-1" />
         </div>
         {seller.status !== "approved" && (
           <p
