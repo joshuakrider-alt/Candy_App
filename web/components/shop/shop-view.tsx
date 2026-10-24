@@ -10,6 +10,7 @@ import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { RemoteImage } from "@/components/remote-image";
 import { CATEGORY_LABELS, ProductArt, ProductCard, stockNote } from "@/components/shop/product-card";
 import { ShopLogo } from "@/components/shop/shop-logo";
+import { ShopTitle } from "@/components/shop/shop-title";
 import type { Storefront } from "@/lib/flask";
 import { isHexColor, money } from "@/lib/format";
 import type { Category, InventoryItem } from "@/lib/types";
@@ -72,6 +73,7 @@ export function ShopView({ storefront }: { storefront: Storefront }) {
         <div className="flex items-center gap-4">
           <ShopLogo name={seller.shop_name} logoUrl={seller.logo_url} theme={seller.theme} className="size-20 ring-4 ring-white/70" />
           <div className="min-w-0">
+            <ShopTitle title={seller.shop_title} className="mb-1" />
             <h1 className="text-3xl leading-tight font-extrabold sm:text-5xl">{seller.shop_name}</h1>
             {seller.tagline && <p className="mt-1 text-lg opacity-90">{seller.tagline}</p>}
           </div>

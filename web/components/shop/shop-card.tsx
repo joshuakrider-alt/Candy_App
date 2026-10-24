@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BadgeCheck, Clock, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ShopLogo } from "@/components/shop/shop-logo";
+import { ShopTitle } from "@/components/shop/shop-title";
 import type { ShopSummary } from "@/lib/flask";
 
 export function isOpenNow(shop: Pick<ShopSummary, "in_stock_count">) {
@@ -19,6 +20,7 @@ export function ShopCard({ shop }: { shop: ShopSummary }) {
       <div className="flex items-start gap-3">
         <ShopLogo name={shop.shop_name} logoUrl={shop.logo_url} theme={shop.theme} />
         <div className="min-w-0">
+          <ShopTitle title={shop.shop_title} className="mb-1" />
           <h3 className="font-heading text-xl leading-tight font-extrabold text-cola group-hover:underline">
             {shop.shop_name}
           </h3>

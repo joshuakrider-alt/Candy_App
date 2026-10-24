@@ -40,6 +40,10 @@ test("a new seller applies, is signed in, and sees the shop is waiting for appro
   const email = `e2e-seller-${Date.now()}@example.com`;
   await page.goto("/sell/apply");
   await page.getByLabel("Shop name").fill("Test Treat Stand");
+  // New shops start as "Candy Shop"; this one writes its own title.
+  await expect(page.getByRole("radio", { name: "Candy Shop" })).toBeChecked();
+  await page.getByText("Something else").click();
+  await page.getByLabel(/^Your title/).fill("Snack Auntie");
   await page.getByLabel("Your name").fill("Tess Tester");
   await page.getByLabel("Neighborhood").fill("Riverside");
   await page.getByLabel("Pickup times").fill("Saturdays, 10 AM to 2 PM");
@@ -50,6 +54,7 @@ test("a new seller applies, is signed in, and sees the shop is waiting for appro
 
   await expect(page).toHaveURL("/seller");
   await expect(page.getByRole("heading", { name: "Test Treat Stand" })).toBeVisible();
+  await expect(page.getByText("Snack Auntie", { exact: true })).toBeVisible();
   await expect(page.getByText("Your shop is waiting for approval")).toBeVisible();
   await expect(page.getByText("No paid orders waiting")).toBeVisible();
 
@@ -207,6 +212,43 @@ test("the shop page form previews as you type and saves", async ({ page }) => {
   await expect(page.getByLabel(/^Tagline/)).toHaveValue("Snacks after school, every day");
 
   await page.getByLabel(/^Tagline/).fill(original);
+  await page.getByRole("button", { name: "Save shop page" }).click();
+  await expect(page.getByText("Shop page saved.")).toBeVisible();
+});
+
+test("the seller picks a shop title and it shows on the shop page and the shop list", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page, "seller", "/seller/storefront");
+  await expect(page).toHaveURL("/seller/storefront");
+  const preview = page.getByLabel("Preview of your shop page");
+  const picker = page.getByRole("group", { name: "Shop title" });
+  const original = (await picker.getByRole("radio", { checked: true }).getAttribute("value"))!;
+
+  // A rude custom title is refused by the API and nothing changes.
+  await picker.getByText("Something else").click();
+  await page.getByLabel(/^Your title/).fill("Sh1t Shop");
+  await page.getByRole("button", { name: "Save shop page" }).click();
+  await expect(page.getByText("please pick a different title")).toBeVisible();
+
+  await picker.getByText("Candy Guy", { exact: true }).click();
+  await expect(preview.getByText("Candy Guy")).toBeVisible();
+  await page.getByRole("button", { name: "Save shop page" }).click();
+  await expect(page.getByText("Shop page saved.")).toBeVisible();
+
+  // The shop page is cached for up to 30 s, like a tagline change, so give it
+  // one refresh window rather than expecting the very next visit to have it.
+  await expect(async () => {
+    await page.goto("/s/northview-snack-stop");
+    await expect(page.getByRole("main").getByText("Candy Guy", { exact: true })).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 45_000, intervals: [2_000, 5_000] });
+  await page.goto("/shops");
+  await expect(
+    page.getByRole("link", { name: /Northview Snack Stop/ }).getByText("Candy Guy", { exact: true }),
+  ).toBeVisible();
+
+  // Put Jordan's shop back as it was.
+  await page.goto("/seller/storefront");
+  await page.getByRole("group", { name: "Shop title" }).getByText(original, { exact: true }).click();
   await page.getByRole("button", { name: "Save shop page" }).click();
   await expect(page.getByText("Shop page saved.")).toBeVisible();
 });

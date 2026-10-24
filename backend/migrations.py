@@ -83,6 +83,11 @@ NEW_COLUMNS = (
     # 0 for every existing order: none was ever flagged, and a shortfall
     # cannot be worked out after the fact.
     ("order", "stock_shortfall", "INTEGER NOT NULL DEFAULT 0"),
+    # Shop title picker. The constant default labels every existing shop
+    # "Candy Lady", exactly as the site already did, and lets the previous
+    # release keep inserting shops after a rollback. New shops get
+    # "Candy Shop" from the application code, not from this default.
+    ("seller", "shop_title", "VARCHAR(40) NOT NULL DEFAULT 'Candy Lady'"),
 )
 
 

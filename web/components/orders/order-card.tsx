@@ -7,6 +7,7 @@ import { STEPS, canFinishPaying, orderStatusLine, stepIndex } from "@/components
 import { PickupCode } from "@/components/orders/pickup-code";
 import type { Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ShopTitle } from "@/components/shop/shop-title";
 
 const TONE = {
   wait: "bg-lemon text-cola",
@@ -34,6 +35,7 @@ export function OrderCard({
     <article className="flex flex-col gap-4 rounded-lg bg-paper/95 p-5 shadow-candy">
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
+          <ShopTitle title={order.seller?.shop_title} className="mb-1" />
           <h2 className="font-heading text-xl font-extrabold text-cola">
             {order.seller?.slug ? (
               <Link href={`/s/${order.seller.slug}`} className="hover:underline">

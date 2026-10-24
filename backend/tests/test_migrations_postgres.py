@@ -193,3 +193,24 @@ def test_postgres_legacy_shops_gain_unique_slug_and_connect_columns(legacy_postg
         with pytest.raises(IntegrityError):
             db.session.commit()
         db.session.rollback()
+
+
+def test_postgres_legacy_shops_keep_candy_lady_and_old_inserts_still_work(
+    legacy_postgres_app,
+):
+    """The shop_title column on Neon: existing rows and rollback-era inserts."""
+    from models import Seller
+
+    with legacy_postgres_app.app_context():
+        assert Seller.query.get(1).shop_title == "Candy Lady"
+        # The previous release's INSERT never names the column.
+        db.session.execute(
+            text(
+                "INSERT INTO seller (shop_name, contact_name, neighborhood, "
+                "pickup_window, status) VALUES ('Old Code Shop', 'Old', 'Here', "
+                "'Weekdays', 'pending')"
+            )
+        )
+        db.session.commit()
+        old = Seller.query.filter_by(shop_name="Old Code Shop").one()
+        assert old.shop_title == "Candy Lady"

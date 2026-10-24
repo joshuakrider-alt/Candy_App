@@ -175,6 +175,16 @@ class Seller(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     shop_name = db.Column(db.String(200), nullable=False)
+    # How the shop is labeled ("Candy Lady", "Candy Shop", or the seller's own
+    # wording; rules in storefront.py). New shops default to "Candy Shop". The
+    # database default stays "Candy Lady" so rows written by older code (and
+    # every shop that predates the column) keep the original wording.
+    shop_title = db.Column(
+        db.String(40),
+        nullable=False,
+        default="Candy Shop",
+        server_default="Candy Lady",
+    )
     contact_name = db.Column(db.String(120), nullable=False)
     contact_email = db.Column(db.String(200))
     neighborhood = db.Column(db.String(120), nullable=False)
@@ -290,6 +300,7 @@ class Seller(db.Model):
         data = {
             "id": self.id,
             "shop_name": self.shop_name,
+            "shop_title": self.shop_title,
             "contact_name": self.contact_name,
             "neighborhood": self.neighborhood,
             "pickup_window": self.pickup_window,

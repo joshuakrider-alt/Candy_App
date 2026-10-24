@@ -14,6 +14,7 @@ export type ShopSummary = {
   slug: string;
   storefront_path: string;
   shop_name: string;
+  shop_title?: string;
   tagline: string | null;
   neighborhood: string;
   pickup_window: string;
