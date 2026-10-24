@@ -403,6 +403,18 @@ DNS change; the Vercel connect half waits for the second project.
   file wins over a rewrite. candy-beta reads `web/vercel.json` (none), not the
   root one, so it is unaffected. No Vercel or Render settings were changed.
 
+## 2026-10-18 — Public contact email switched to hello@ (Claude Code)
+
+- Every public page of the static site showed a personal Gmail address in the
+  footer and contact text. All 22 occurrences in 12 HTML files (`index`,
+  `about`, `faq`, `contact`, `privacy`, `terms`, `pickup`, `apply`, `seller`,
+  `buyer`, `admin`, and `shop.html`, which serves `/s/<slug>`) now use
+  `hello@neighborhoodcandylady.com`, including the `mailto:` links.
+- Checked with no change needed: `web/`, `backend/` (no outbound email,
+  error message or `/config` field carries a contact address), `app.js`,
+  `README.md`, `robots.txt`, `sitemap.xml`. Internal docs are not published
+  and were left alone. No Vercel or Render settings were changed.
+
 ## 2026-10-20 — Next.js Day 1 finished: layout, sign-in, proxy, info pages (Claude Code)
 
 - Joshua's go (Oct 20): Days 1–5 of `docs/NEXTJS_MIGRATION_PLAN.md`, one PR
@@ -563,6 +575,16 @@ DNS change; the Vercel connect half waits for the second project.
   Not yet tried against Stripe itself.
 - API tests: 239 passed, 7 skipped. No Stripe, Vercel or Render settings
   changed. Cutover not started.
+
+## 2026-10-24 — Merged main into staging before cutover (Claude Code)
+
+- Joshua asked for `main` to be merged into `staging` so the later
+  staging-to-main cutover PR is clean. `main` had one change staging lacked:
+  PR #27 (public contact email switched to hello@ on the 12 static pages).
+- The only conflict was this file. Both sides were kept in full; main's
+  2026-10-18 entry sits before staging's 2026-10-20 entries so the log stays
+  in date order. The 12 HTML files merged without conflict.
+- No Vercel, Render, Stripe or DNS settings changed. Cutover not started.
 
 ## Logging rule
 
