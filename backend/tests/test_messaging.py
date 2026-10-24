@@ -37,7 +37,7 @@ def test_a_buyer_messages_support_and_an_admin_replies(buyer, admin):
     assert thread["messages"][0]["from_me"] is True
 
     assert admin.get("/messages/unread").get_json()["unread"] == 1
-    listed = admin.get("/conversations").get_json()
+    listed = admin.get("/conversations").get_json()["conversations"]
     assert [c["id"] for c in listed] == [thread["id"]]
     assert listed[0]["with"]["name"] == "Alice Carter"
     assert listed[0]["unread_count"] == 1
@@ -55,7 +55,7 @@ def test_a_buyer_messages_support_and_an_admin_replies(buyer, admin):
 
 def test_a_shop_messages_support_as_the_shop(kiki_seller, admin):
     thread = support(kiki_seller, subject="Payout question").get_json()
-    listed = admin.get("/conversations").get_json()
+    listed = admin.get("/conversations").get_json()["conversations"]
     assert listed[0]["id"] == thread["id"]
     assert listed[0]["with"] == {"type": "seller", "id": kiki_seller.user["seller_id"], "name": "Ms. Kiki's Snack Spot"}
 
@@ -76,7 +76,33 @@ def test_people_only_see_their_own_conversations(client, buyer, kiki_seller):
     assert bob.get(f"/conversations/{thread['id']}").status_code == 404
     assert bob.post(f"/conversations/{thread['id']}/messages", json={"body": "hi"}).status_code == 404
     assert kiki_seller.get(f"/conversations/{thread['id']}").status_code == 404
-    assert bob.get("/conversations").get_json() == []
+    assert bob.get("/conversations").get_json() == {"conversations": [], "next_offset": None}
+
+
+def test_reading_stops_at_the_last_message_the_browser_showed(buyer, admin):
+    thread = support(buyer).get_json()
+    shown = thread["messages"][0]["id"]
+    admin.post(f"/conversations/{thread['id']}/messages", json={"body": "first"})
+    seen = buyer.get(f"/conversations/{thread['id']}").get_json()["messages"][-1]["id"]
+    # A second reply lands after the browser fetched the thread.
+    admin.post(f"/conversations/{thread['id']}/messages", json={"body": "second"})
+    assert buyer.post(f"/conversations/{thread['id']}/read", json={"last_message_id": seen}).status_code == 204
+    assert buyer.get("/messages/unread").get_json()["unread"] == 1
+    assert shown < seen
+    assert buyer.post(f"/conversations/{thread['id']}/read", json={"last_message_id": "x"}).status_code == 400
+
+
+def test_the_inbox_pages_instead_of_dropping_old_threads(monkeypatch, buyer, admin):
+    import messaging
+
+    monkeypatch.setattr(messaging, "CONVERSATION_PAGE_SIZE", 2)
+    ids = [support(buyer, subject=f"Help {n}").get_json()["id"] for n in range(3)]
+    first = admin.get("/conversations").get_json()
+    assert [c["id"] for c in first["conversations"]] == [ids[2], ids[1]]
+    assert first["next_offset"] == 2
+    second = admin.get("/conversations?offset=2").get_json()
+    assert [c["id"] for c in second["conversations"]] == [ids[0]]
+    assert second["next_offset"] is None
 
 
 # ----------------------------------------------------------------------
@@ -93,7 +119,7 @@ def test_approved_shops_can_message_each_other(kiki_seller, northview_seller):
         },
     )
     assert created.status_code == 201, created.get_json()
-    listed = northview_seller.get("/conversations").get_json()
+    listed = northview_seller.get("/conversations").get_json()["conversations"]
     assert listed[0]["with"]["name"] == "Ms. Kiki's Snack Spot"
     assert listed[0]["unread_count"] == 1
 

@@ -236,6 +236,9 @@ export type ConversationSummary = {
   can_block: boolean;
 };
 
+/** GET /conversations?offset= : newest first, 50 at a time. */
+export type ConversationPage = { conversations: ConversationSummary[]; next_offset: number | null };
+
 /** GET /conversations/<id>: the summary plus every message. */
 export type ConversationDetail = ConversationSummary & {
   messages: ChatMessage[];

@@ -53,6 +53,7 @@ DELETED_LABEL = "Deleted account"
 MAX_SUBJECT_LENGTH = 120
 MAX_REPORT_REASON_LENGTH = 500
 PREVIEW_LENGTH = 140
+CONVERSATION_PAGE_SIZE = 50
 REPORT_CONTEXT_MESSAGES = 5
 
 # Orders a buyer actually paid for. Unpaid and expired checkouts never became
@@ -228,6 +229,11 @@ def enforce_rate_limit(user, new_conversation=False):
     """429 when a login is sending faster than a person types. Admins are exempt."""
     if user.role == "admin":
         return
+    # Hold the login's row until this request commits, so two requests sent
+    # at once take turns: each counts the other's message instead of both
+    # counting the same total and both slipping under the limit. SQLite has
+    # no row locks, but its single writer serializes these requests anyway.
+    db.session.query(User.id).filter(User.id == user.id).with_for_update().one()
     config = current_app.config
     now = utcnow()
     sent = Message.query.filter(Message.sender_user_id == user.id)
@@ -281,13 +287,18 @@ def unread_by_conversation(user):
     return dict(_unread_query(user, party_of(user)).all())
 
 
-def mark_read(user, conversation):
-    latest = (
-        db.session.query(func.max(Message.id))
-        .filter(Message.conversation_id == conversation.id)
-        .scalar()
-        or 0
+def mark_read(user, conversation, up_to=None):
+    """Advance the read marker, never past `up_to` when it is given.
+
+    The browser passes the newest message it actually displayed, so a message
+    that lands between its fetch and this call stays unread.
+    """
+    latest_query = db.session.query(func.max(Message.id)).filter(
+        Message.conversation_id == conversation.id
     )
+    if up_to is not None:
+        latest_query = latest_query.filter(Message.id <= up_to)
+    latest = latest_query.scalar() or 0
     row = ConversationRead.query.filter_by(
         conversation_id=conversation.id, user_id=user.id
     ).first()
@@ -503,18 +514,29 @@ def unread_count():
 def list_conversations():
     user = current_user()
     me = party_of(user)
-    conversations = (
+    offset = request.args.get("offset", 0, type=int) or 0
+    if offset < 0:
+        abort(400, description="offset must be 0 or more")
+    # One extra row says whether there is an older page, without a count.
+    rows = (
         Conversation.query.join(
             ConversationParty, ConversationParty.conversation_id == Conversation.id
         )
         .filter(_matches(ConversationParty.party_type, ConversationParty.party_id, me))
         .order_by(Conversation.last_message_at.desc(), Conversation.id.desc())
-        .limit(100)
+        .offset(offset)
+        .limit(CONVERSATION_PAGE_SIZE + 1)
         .all()
     )
     unread = unread_by_conversation(user)
     return jsonify(
-        [conversation_dict(c, user, unread.get(c.id, 0)) for c in conversations]
+        conversations=[
+            conversation_dict(c, user, unread.get(c.id, 0))
+            for c in rows[:CONVERSATION_PAGE_SIZE]
+        ],
+        next_offset=offset + CONVERSATION_PAGE_SIZE
+        if len(rows) > CONVERSATION_PAGE_SIZE
+        else None,
     )
 
 
@@ -654,7 +676,10 @@ def reply(conversation_id):
 def read_conversation(conversation_id):
     user = current_user()
     conversation = conversation_for(user, conversation_id)
-    mark_read(user, conversation)
+    up_to = (request.get_json(silent=True) or {}).get("last_message_id")
+    if up_to is not None and (not isinstance(up_to, int) or isinstance(up_to, bool)):
+        abort(400, description="last_message_id must be a message id")
+    mark_read(user, conversation, up_to)
     try:
         db.session.commit()
     except IntegrityError:

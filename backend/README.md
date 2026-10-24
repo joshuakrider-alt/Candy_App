@@ -385,8 +385,8 @@ Signed in:
 - `POST /sellers/<id>/stripe/connect`, `GET /sellers/<id>/stripe/status`, `POST /sellers/<id>/stripe/dashboard` — Connect onboarding, status refresh, Express dashboard link (that shop's seller, or admin)
 
 - `GET /messages/unread` — unread count for the nav
-- `GET /conversations`, `POST /conversations` — inbox, and start one (`kind`: `support`, `seller` or `order`)
-- `GET /conversations/<id>`, `POST /conversations/<id>/messages`, `POST /conversations/<id>/read`
+- `GET /conversations?offset=`, `POST /conversations` — inbox 50 at a time (`next_offset` is null on the last page), and start one (`kind`: `support`, `seller` or `order`)
+- `GET /conversations/<id>`, `POST /conversations/<id>/messages`, `POST /conversations/<id>/read` (body `{"last_message_id": n}` stops the marker at the newest message on screen)
 - `POST /conversations/<id>/block`, `DELETE /conversations/<id>/block`
 - `POST /messages/<id>/report`
 

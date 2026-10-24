@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FormMessage, Panel } from "@/components/panel";
-import { useRefreshMessages, when } from "@/components/messages/use-unread";
+import { useMessagesKey, useRefreshMessages, when } from "@/components/messages/use-unread";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/error-text";
 import type { ChatMessage, ConversationDetail } from "@/lib/types";
@@ -100,7 +100,8 @@ function ReportButton({ message }: { message: ChatMessage }) {
 export function ConversationThread({ id, backHref }: { id: number; backHref: string }) {
   const client = useQueryClient();
   const refreshMessages = useRefreshMessages();
-  const key = ["messages", "thread", id];
+  const [scope, userId] = useMessagesKey();
+  const key = [scope, userId, "thread", id];
   const { data, error, isPending } = useQuery({
     queryKey: key,
     queryFn: () => api.get<ConversationDetail>(`/conversations/${id}`),
@@ -114,13 +115,14 @@ export function ConversationThread({ id, backHref }: { id: number; backHref: str
   const unread = data?.unread_count ?? 0;
   const latest = data?.messages.at(-1)?.id;
   useEffect(() => {
-    if (!unread) return;
-    // Opening the thread reads it; the badge in the header follows.
+    if (!unread || !latest) return;
+    // Opening the thread reads it, up to the newest message on screen; the
+    // badge in the header follows.
     api
-      .post(`/conversations/${id}/read`)
-      .then(() => client.invalidateQueries({ queryKey: ["messages", "unread"] }))
+      .post(`/conversations/${id}/read`, { last_message_id: latest })
+      .then(() => client.invalidateQueries({ queryKey: [scope, userId, "unread"] }))
       .catch(() => {});
-  }, [id, unread, latest, client]);
+  }, [id, unread, latest, client, scope, userId]);
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });

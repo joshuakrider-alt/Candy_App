@@ -587,7 +587,10 @@ DNS change; the Vercel connect half waits for the second project.
 - Staging only: the new tables appear on the staging Neon branch when the
   staging API next deploys from `staging`. No Vercel, Render, Neon, DNS or
   production settings changed.
-- API tests: 276 passed, 8 skipped (SQLite). Browser tests: 104 passed.
+- Codex review fixes in the same PR: messaging caches keyed by the signed-in
+  login, rate-limit checks serialized per login (row lock), read marker stops
+  at the newest message the browser showed, inbox pages 50 at a time.
+- API tests: 278 passed, 8 skipped (SQLite). Browser tests: 104 passed.
 
 ## Logging rule
 

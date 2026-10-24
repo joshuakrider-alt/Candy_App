@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { buttonVariants } from "@/components/ui/button";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Panel } from "@/components/panel";
-import { badgeText, when } from "@/components/messages/use-unread";
+import { badgeText, useMessagesKey, when } from "@/components/messages/use-unread";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/error-text";
-import type { ConversationKind, ConversationSummary } from "@/lib/types";
+import type { ConversationKind, ConversationPage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<ConversationKind, string> = {
@@ -29,11 +29,15 @@ export function ConversationList({
   description?: string;
   showNew?: boolean;
 }) {
-  const { data, error, isPending } = useQuery({
-    queryKey: ["messages", "list"],
-    queryFn: () => api.get<ConversationSummary[]>("/conversations"),
+  const key = useMessagesKey();
+  const { data: pages, error, isPending, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: [...key, "list"],
+    queryFn: ({ pageParam }) => api.get<ConversationPage>(`/conversations?offset=${pageParam}`),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.next_offset ?? undefined,
     refetchInterval: 30_000,
   });
+  const data = pages?.pages.flatMap((page) => page.conversations);
 
   return (
     <Panel title={title} description={description}>
@@ -55,7 +59,7 @@ export function ConversationList({
         <p role="alert" className="font-bold text-destructive">
           {errorText(error, "Could not load your messages.")}
         </p>
-      ) : !data.length ? (
+      ) : !data?.length ? (
         <p className="text-muted-foreground">No messages yet.</p>
       ) : (
         <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border bg-white">
@@ -96,6 +100,16 @@ export function ConversationList({
             </li>
           ))}
         </ul>
+      )}
+      {hasNextPage && (
+        <Button
+          variant="outline"
+          onClick={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+          className="mt-3 rounded-full font-bold"
+        >
+          Show older conversations
+        </Button>
       )}
     </Panel>
   );

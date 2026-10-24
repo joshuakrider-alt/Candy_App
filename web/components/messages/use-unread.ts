@@ -5,14 +5,23 @@ import { api } from "@/lib/api";
 import type { UnreadCount } from "@/lib/types";
 import { useSession } from "@/lib/use-session";
 
-export const UNREAD_QUERY_KEY = ["messages", "unread"] as const;
+/**
+ * The start of every messaging query key, scoped to the signed-in login.
+ * The query cache outlives a sign-out, so without the id the next person to
+ * sign in on this browser would briefly see the last one's inbox.
+ */
+export function useMessagesKey() {
+  const { data: session } = useSession();
+  return ["messages", session?.user?.id ?? null] as const;
+}
 
 /** Unread messages for the signed-in visitor, checked every minute. 0 when signed out. */
 export function useUnreadCount() {
   const { data: session } = useSession();
   const signedIn = !!session?.user;
+  const key = useMessagesKey();
   const { data } = useQuery({
-    queryKey: UNREAD_QUERY_KEY,
+    queryKey: [...key, "unread"],
     queryFn: () => api.get<UnreadCount>("/messages/unread"),
     enabled: signedIn,
     refetchInterval: 60_000,
