@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { E2E_PASSWORDS } from "../../playwright.config";
 import { sessionCookie, signIn } from "./fixtures";
 
 // Testing and acceptance flows 4, 5, 7 and 8 as far as they can run without
@@ -191,6 +192,37 @@ test("the receipt shows the pickup address for a paid order and nothing for an u
   await page.goto("/account/orders/41");
   await expect(page.getByRole("heading", { name: "No receipt for order #41" })).toBeVisible();
   await expect(page.getByText("100 Example Ave")).toHaveCount(0);
+});
+
+test("signing out drops the last account's cached receipt, so the next account cannot see its address", async ({ page }) => {
+  let allowed = true;
+  let fetches = 0;
+  await page.route("**/api/flask/orders/42", (route) => {
+    fetches += 1;
+    return allowed
+      ? route.fulfill({ json: paidOrder })
+      : route.fulfill({ status: 403, json: { error: "you do not have access to this order" } });
+  });
+  await signIn(page, "buyer", "/account/orders/42");
+  await expect(page.getByTestId("pickup-address")).toHaveText("100 Example Ave, Cherry Hill");
+
+  // Same tab, no reload: sign out from the menu and sign in as someone else.
+  await page.getByRole("button", { name: "Alice" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.waitForURL("**/login");
+  allowed = false;
+  await page.getByLabel("Email").fill("bob@example.com");
+  await page.getByLabel("Password").fill(E2E_PASSWORDS.buyer);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL("**/shops");
+
+  // A client-side visit keeps the React Query cache, which is where a stale receipt would come from.
+  const before = fetches;
+  await page.evaluate(() => (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push("/account/orders/42"));
+  await page.waitForURL("**/account/orders/42");
+  await expect(page.getByText(/do not have access to this order/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("100 Example Ave")).toHaveCount(0);
+  expect(fetches).toBeGreaterThan(before);
 });
 
 test("a paid order from a shop with no address yet says it will appear", async ({ page }) => {
