@@ -18,7 +18,7 @@ import { FormMessage, Panel } from "@/components/panel";
 import { errorText } from "@/lib/error-text";
 import { useSellerId, useSellerShop } from "@/components/seller/seller-shop";
 import { refreshShopPages } from "@/app/actions/refresh-shops";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { InventoryItem, StockStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,9 @@ const STOCK_LABEL: Record<StockStatus, string> = {
 type Editing = { mode: "new" } | { mode: "own"; item: InventoryItem } | { mode: "count"; item: InventoryItem };
 
 const field = "flex flex-col gap-1.5 text-sm font-bold text-cola";
+
+/** What is on the shelf: units for sale plus units held by open checkouts. */
+const onHand = (item: InventoryItem) => item.on_hand_count ?? item.inventory_count;
 
 /** Dollars typed by a seller ("1.50", "$2") to cents, or null when it isn't a price. */
 export function toCents(value: string) {
@@ -57,7 +60,18 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       setError("Stock must be a whole number, 0 or more.");
       return;
     }
-    let body: Record<string, unknown> = { inventory_count: count };
+    // The count is what is on the shelf. Flask takes the units held by open
+    // checkouts back off on_hand_count, and answers 409 if the held units
+    // are no longer the ones shown here. inventory_count, the count for sale,
+    // is only read by an API from before on_hand_count. A new item has
+    // nothing held yet.
+    const held = item?.reserved_count ?? 0;
+    if (count < held) {
+      setError(`${held} are held in open checkouts, so count at least ${held}.`);
+      return;
+    }
+    let body: Record<string, unknown> = { on_hand_count: count, reserved_count: held, inventory_count: count - held };
+    if (item) body.seen_inventory_count = item.inventory_count;
     if (editing.mode !== "count") {
       const priceCents = toCents(String(data.get("price") ?? ""));
       if (priceCents === null) {
@@ -82,7 +96,12 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
       onSaved();
       onClose();
     } catch (e) {
-      setError(errorText(e));
+      if (e instanceof ApiRequestError && e.status === 409) {
+        // Held units changed while the dialog was open: start again from the new counts.
+        toast.error(errorText(e));
+        onSaved();
+        onClose();
+      } else setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -125,16 +144,21 @@ function ItemDialog({ editing, onClose, onSaved }: { editing: Editing | null; on
             </>
           )}
           <label className={field}>
-            How many you have
+            {editing?.mode === "new" ? "How many you have" : "How many are on your shelf"}
             <Input
               name="inventory_count"
               type="number"
               min={0}
               step={1}
               required
-              defaultValue={item?.inventory_count ?? 10}
+              defaultValue={item ? onHand(item) : 10}
               className="h-11 bg-white"
             />
+            {!!item?.reserved_count && (
+              <span className="font-normal text-muted-foreground">
+                Include the {item.reserved_count} held in open checkouts; leave out ones packed for paid orders.
+              </span>
+            )}
           </label>
           <FormMessage error>{error}</FormMessage>
           <DialogFooter>
@@ -207,13 +231,23 @@ export function InventoryManager() {
   async function toggle(item: InventoryItem) {
     const out = item.status === "out-of-stock";
     // Same rule as the old page: back in stock starts at no fewer than 8.
-    const body = out ? { status: "in-stock", inventory_count: Math.max(8, item.inventory_count) } : { status: "out-of-stock" };
+    const body = out
+      ? {
+          status: "in-stock",
+          // At least 8 for sale, on top of any units held by open checkouts.
+          on_hand_count: Math.max(8, item.inventory_count) + (item.reserved_count ?? 0),
+          reserved_count: item.reserved_count ?? 0,
+          seen_inventory_count: item.inventory_count,
+          inventory_count: Math.max(8, item.inventory_count),
+        }
+      : { status: "out-of-stock" };
     setBusy(item.candy_id);
     try {
       await api.put(`/sellers/${sellerId}/inventory/${item.candy_id}`, body);
       await Promise.all([reload(), refreshShopPages().catch(() => {})]);
     } catch (e) {
       toast.error(errorText(e));
+      await reload();
     } finally {
       setBusy(null);
     }
@@ -270,6 +304,7 @@ export function InventoryManager() {
                     <h3 className="font-heading text-lg font-extrabold text-cola">{candy.name}</h3>
                     <p className="text-sm text-cola">
                       {money(candy.price_cents)} · {item.inventory_count} left ·{" "}
+                      {!!item.reserved_count && <>{item.reserved_count} held in open checkouts · </>}
                       <strong className={out ? "text-destructive" : undefined}>{STOCK_LABEL[item.status]}</strong>
                     </p>
                   </div>
