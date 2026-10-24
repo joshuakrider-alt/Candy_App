@@ -203,3 +203,59 @@ export type Revenue = {
   platform_fee_percent: number;
   platform_fee_flat_cents: number;
 };
+
+// ----------------------------------------------------------------------
+// Messaging: backend/messaging.py
+// ----------------------------------------------------------------------
+
+export type ConversationKind = "support" | "seller" | "order";
+export type PartyType = "user" | "seller" | "support";
+
+/** message_dict() */
+export type ChatMessage = {
+  id: number;
+  body: string;
+  created_at: string | null;
+  from_me: boolean;
+  sender_name: string;
+  sender_type: PartyType;
+};
+
+/** conversation_dict(): GET /conversations rows. */
+export type ConversationSummary = {
+  id: number;
+  kind: ConversationKind;
+  subject: string;
+  order_id: number | null;
+  created_at: string | null;
+  last_message_at: string | null;
+  with: { type: PartyType | null; id: number | null; name: string };
+  unread_count: number;
+  last_message: { preview: string; from_me: boolean; created_at: string | null } | null;
+  blocked: { by_me: boolean; by_them: boolean };
+  can_block: boolean;
+};
+
+/** GET /conversations/<id>: the summary plus every message. */
+export type ConversationDetail = ConversationSummary & {
+  messages: ChatMessage[];
+  /** Why you can't reply right now (blocked, other side deleted), or null. */
+  reply_problem: string | null;
+};
+
+/** GET /messages/unread */
+export type UnreadCount = { unread: number; conversations: number };
+
+/** GET /admin/message-reports */
+export type MessageReport = {
+  id: number;
+  status: "open" | "resolved";
+  reason: string | null;
+  created_at: string | null;
+  resolved_at: string | null;
+  message_id: number;
+  reporter_name: string;
+  conversation: { id: number; kind: ConversationKind; subject: string };
+  message: { id: number; body: string; sender_name: string; sender_type: PartyType; created_at: string | null };
+  context: { id: number; body: string; sender_name: string; created_at: string | null }[];
+};
