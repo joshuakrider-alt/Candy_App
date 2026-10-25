@@ -1,9 +1,14 @@
+import Image from "next/image";
 import Link from "next/link";
-import { CONTACT_EMAIL, FOOTER_COLUMNS } from "@/components/site-links";
+import { CONTACT_EMAIL, FOOTER_COLUMNS, PLAY_STORE_URL } from "@/components/site-links";
 
-export function SiteFooter() {
+// tabBar: leave room under the footer for the phone tab bar, which only the
+// store pages have.
+export function SiteFooter({ tabBar = true }: { tabBar?: boolean }) {
   return (
-    <footer className="mt-16 rounded-t-[26px] bg-cola pt-12 pb-28 text-cream sm:rounded-t-[38px] md:pb-8">
+    <footer
+      className={`mt-16 rounded-t-[26px] bg-cola pt-12 text-cream sm:rounded-t-[38px] md:pb-8 ${tabBar ? "pb-28" : "pb-8"}`}
+    >
       <div className="mx-auto w-full max-w-6xl px-4">
         <div className="grid gap-8 md:grid-cols-[2fr_1fr_1fr_1fr]">
           <div>
@@ -14,6 +19,19 @@ export function SiteFooter() {
             <p className="mt-2 max-w-sm text-cream/80">
               Neighborhood sellers. Candy, sweets, snacks, and cold drinks. Pay by card, then pick up with your code.
             </p>
+            {/* Google's badge artwork, unchanged. Their badge rules: link it to
+                the Play listing, keep clear space of at least a quarter of its
+                height around it (my-3 here, plus the text gaps), and credit
+                the trademark (bottom line of this footer). */}
+            <a href={PLAY_STORE_URL} className="my-3 inline-block" rel="noopener">
+              <Image
+                src="/badges/google-play-en.svg"
+                alt="Get it on Google Play"
+                width={162}
+                height={48}
+                className="h-12 w-auto"
+              />
+            </a>
           </div>
           {FOOTER_COLUMNS.map((column) => (
             <div key={column.title} className="flex flex-col gap-2">
@@ -42,6 +60,7 @@ export function SiteFooter() {
             </a>
           </p>
         </div>
+        <p className="mt-3 text-xs text-cream/60">Google Play and the Google Play logo are trademarks of Google LLC.</p>
       </div>
     </footer>
   );
