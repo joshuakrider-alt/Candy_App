@@ -74,10 +74,26 @@ export function OrderCard({
 
       <OrderItems order={order} />
 
-      {order.pickup_code && (
-        <Link href={`/account/orders/${order.id}`} className="self-start text-sm font-bold text-cherry-deep underline">
-          View receipt
-        </Link>
+      {(order.pickup_code ||
+        order.payment_status === "paid" ||
+        order.payment_status === "pay_at_pickup" ||
+        order.payment_status === "refunded") && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {order.pickup_code && (
+            <Link href={`/account/orders/${order.id}`} className="text-sm font-bold text-cherry-deep underline">
+              View receipt
+            </Link>
+          )}
+          {(order.payment_status === "paid" || order.payment_status === "pay_at_pickup" || order.payment_status === "refunded") && (
+            <Link
+              href={`/account/messages/new?order=${order.id}`}
+              prefetch={false}
+              className="text-sm font-bold text-cherry-deep underline"
+            >
+              Message the shop
+            </Link>
+          )}
+        </div>
       )}
 
       {canFinishPaying(order) && (

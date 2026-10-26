@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { AccountMenu } from "@/components/account-menu";
 import { CartButton } from "@/components/cart/cart-button";
+import { MessagesButton } from "@/components/messages/messages-button";
 import { NAV_LINKS } from "@/components/site-links";
 
 export function SiteHeader() {
@@ -43,6 +44,7 @@ export function SiteHeader() {
 
         <div className="ml-auto flex items-center gap-2 md:ml-0">
           <CartButton />
+          <MessagesButton />
           <AccountMenu />
         </div>
       </div>

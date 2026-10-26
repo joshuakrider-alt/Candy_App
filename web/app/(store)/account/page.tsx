@@ -13,9 +13,14 @@ export default async function AccountPage() {
     <>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h1 className="text-4xl font-extrabold text-cola">Your account</h1>
-        <Link href="/account/orders" className="font-bold text-cherry-deep underline">
-          Your orders
-        </Link>
+        <div className="flex gap-4">
+          <Link href="/account/messages" className="font-bold text-cherry-deep underline">
+            Messages
+          </Link>
+          <Link href="/account/orders" className="font-bold text-cherry-deep underline">
+            Your orders
+          </Link>
+        </div>
       </div>
       <AccountSettings user={me.user} />
     </>

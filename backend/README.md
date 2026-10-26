@@ -39,6 +39,14 @@ The API listens on `http://127.0.0.1:5000`. A frontend served from
 | `ADMIN_BOOTSTRAP_EMAIL` | no | unset | See "First admin" below |
 | `ADMIN_BOOTSTRAP_PASSWORD` | no | unset | See "First admin" below |
 | `ADMIN_BOOTSTRAP_NAME` | no | `Platform Admin` | Only used when creating the account |
+| `MESSAGE_MAX_LENGTH` | no | `2000` | Longest message, in characters |
+| `MESSAGE_RATE_PER_MINUTE` | no | `6` | Messages one login may send per minute (admins exempt) |
+| `MESSAGE_RATE_PER_HOUR` | no | `60` | Messages one login may send per hour (admins exempt) |
+| `CONVERSATION_RATE_PER_DAY` | no | `10` | New conversations one login may start per day (admins exempt) |
+| `MESSAGE_EMAIL_NOTIFICATIONS` | no | off | `true` turns on "you have a new message" emails. Nothing is sent unless the two below are set too |
+| `RESEND_API_KEY` | for email | empty | Resend API key (`re_...`). Never commit it |
+| `MESSAGE_EMAIL_FROM` | for email | empty | e.g. `The Candy Lady <hello@neighborhoodcandylady.com>`; the domain must be verified in Resend |
+| `SUPPORT_NOTIFY_EMAIL` | no | empty | Where support notices go (e.g. `hello@neighborhoodcandylady.com`) instead of every admin's own address |
 
 `PROTOTYPE_LOGIN_PASSWORD` is gone. If it is still set, the API logs a warning
 and ignores it; remove it from Render.
@@ -83,6 +91,7 @@ What happens:
 | Checkouts still holding stock (`unpaid`/`pending`) | Marked `expired` and their reserved units returned to the shelf |
 | The seller queue | Anonymized orders stay in it, with `buyer_name` reading "Deleted account" |
 | That person's shop, if they were a seller | Not deleted. Contact details that were theirs are cleared, and if they were the shop's last login it goes back to `pending`, which hides it from buyers without touching its inventory or other buyers' orders |
+| Messages they sent | Kept for the other side, shown as from "Deleted account"; the link to the account is removed. Their read markers and blocks are deleted, and that conversation can no longer be replied to |
 | Everyone else's data | Untouched |
 
 Admins cannot delete themselves through this endpoint: it returns 403. That is
@@ -317,6 +326,39 @@ Hooks for guided self-serve onboarding (later PR): a shop's `slug` and
 `connect.status` are everything a signup funnel needs to show "your link" and
 "finish payouts"; approval is still the admin step that makes both live.
 
+## Messaging
+
+`messaging.py` (a Flask blueprint) is the signed-in inbox. Each login acts as
+one *party*: a buyer as itself, a seller login as its shop (so every login of a
+shop shares one inbox), and an admin as "support" (every admin sees and answers
+every support thread; replies show as "Candy Lady support").
+
+| Kind | Who can start it | Between |
+| --- | --- | --- |
+| `support` | anyone signed in; an admin by naming `seller_id` or `user_id` | that buyer or shop, and support |
+| `seller` | an approved shop | two different approved shops |
+| `order` | the order's buyer or its shop, once paid (`paid`, `pay_at_pickup`, `refunded`) | that buyer and that shop; one thread per order |
+
+Admins never read `seller` or `order` threads, except the messages around one
+that somebody reported. Someone who is not a party gets 404, not 403, so ids do
+not reveal which conversations exist.
+
+Abuse protection: every message is capped at `MESSAGE_MAX_LENGTH`, sending is
+rate limited per login (counted in the database, so it holds across gunicorn
+workers), either side of a `seller` or `order` thread can block the other
+(which stops both directions until unblocked), and any message can be reported
+to `GET /admin/message-reports`. Support can never be blocked.
+
+Email notices are off by default (see `MESSAGE_EMAIL_*` above). When on, the
+recipient gets one email per conversation until they read it, with a link and
+never the message text. `mailer.py` sends through Resend's HTTP API with the
+standard library, so there is no new dependency.
+
+The tables (`conversation`, `conversation_party`, `message`,
+`conversation_read`, `message_block`, `message_report`) are new, so
+`db.create_all()` creates them on the first boot of a deploy; nothing existing
+is altered.
+
 ## Schema migrations
 
 There is no Alembic yet. `backend/migrations.py` adds the new columns in place
@@ -361,6 +403,12 @@ Signed in:
 - `PUT /sellers/<id>/pickup` — private pickup address and note (that shop's seller, or admin)
 - `POST /sellers/<id>/stripe/connect`, `GET /sellers/<id>/stripe/status`, `POST /sellers/<id>/stripe/dashboard` — Connect onboarding, status refresh, Express dashboard link (that shop's seller, or admin)
 
+- `GET /messages/unread` — unread count for the nav
+- `GET /conversations?offset=`, `POST /conversations` — inbox 50 at a time (`next_offset` is null on the last page), and start one (`kind`: `support`, `seller` or `order`)
+- `GET /conversations/<id>`, `POST /conversations/<id>/messages`, `POST /conversations/<id>/read` (body `{"last_message_id": n}` stops the marker at the newest message on screen)
+- `POST /conversations/<id>/block`, `DELETE /conversations/<id>/block`
+- `POST /messages/<id>/report`
+
 Admin only:
 
 - `GET /applications`, `PUT /applications/<seller_id>`
@@ -368,6 +416,7 @@ Admin only:
 - `POST /candies`, `PUT /candies/<id>`, `DELETE /candies/<id>` (retires the item: `is_active=false` and every shop's stock zeroed; past orders keep naming it)
 - `GET /orders`, `GET /admin/revenue`
 - `POST /admin/orders/<id>/refund`
+- `GET /admin/message-reports`, `PUT /admin/message-reports/<id>`
 
 ## Tests
 
