@@ -9,11 +9,14 @@ export const DEFAULT_SHOP_TITLE = "Candy Shop";
 export const SHOP_TITLE_MIN = 2;
 export const SHOP_TITLE_MAX = 24;
 
-const ALLOWED = /^[\p{L}\p{N}](?:[\p{L}\p{N} '’&.-]*[\p{L}\p{N}]\.?)?$/u;
+// Letters, the combining marks scripts like Devanagari need, digits, and a
+// little punctuation: _title_shape_ok in storefront.py.
+const ALLOWED = /^[\p{L}\p{N}](?:[\p{L}\p{M}\p{N} '’&.-]*[\p{L}\p{M}\p{N}]\.?)?$/u;
 
 export const isPresetTitle = (title: string) => (SHOP_TITLE_PRESETS as readonly string[]).includes(title);
 
-export const cleanShopTitle = (raw: string) => raw.replace(/\s+/g, " ").trim();
+// NFC, as Flask stores it, so the length shown matches what is saved.
+export const cleanShopTitle = (raw: string) => raw.replace(/\s+/g, " ").normalize("NFC").trim();
 
 /** Why a typed title won't be accepted, or null if it looks fine to send. */
 export function shopTitleProblem(raw: string): string | null {

@@ -189,10 +189,26 @@ DEFAULT_SHOP_TITLE = "Candy Shop"
 SHOP_TITLE_MIN_LENGTH = 2
 SHOP_TITLE_MAX_LENGTH = 24
 
-# Letters (any script), digits, spaces and a little punctuation a title might
-# reasonably use. Anything else (emoji, symbols, markup) is refused rather
-# than stripped, so the seller sees exactly what will be shown.
-SHOP_TITLE_PATTERN = re.compile(r"^[^\W_](?:(?:[^\W_]|[ '’&.\-])*[^\W_]\.?)?$", re.UNICODE)
+# Letters (any script, with the combining marks scripts like Devanagari need),
+# digits, spaces and a little punctuation a title might reasonably use.
+# Anything else (emoji, symbols, markup) is refused rather than stripped, so
+# the seller sees exactly what will be shown.
+SHOP_TITLE_PUNCTUATION = frozenset(" '’&.-")
+
+
+def _title_shape_ok(title):
+    """Starts with a letter or digit, ends with one (or a single "."), and
+    holds only letters, marks, digits and SHOP_TITLE_PUNCTUATION between."""
+    def word_char(char):
+        return unicodedata.category(char)[0] in "LN"
+
+    def joins_word(char):
+        return unicodedata.category(char)[0] in "LMN"
+
+    body = title[:-1] if title.endswith(".") and len(title) > 1 else title
+    if not word_char(body[0]) or not joins_word(body[-1]):
+        return False
+    return all(joins_word(char) or char in SHOP_TITLE_PUNCTUATION for char in body)
 
 # A basic filter, not a moderation system: it stops the obvious cases and
 # leaves the rest to admin review. Whole words only, so "Scunthorpe"-style
@@ -246,7 +262,7 @@ def shop_title_problem(title):
         return None
     if len(title) < SHOP_TITLE_MIN_LENGTH or len(title) > SHOP_TITLE_MAX_LENGTH:
         return f"title must be {SHOP_TITLE_MIN_LENGTH}-{SHOP_TITLE_MAX_LENGTH} characters"
-    if not SHOP_TITLE_PATTERN.match(title):
+    if not _title_shape_ok(title):
         return "title may only use letters, numbers, spaces and ' & . -"
     words = _title_words(title)
     pieces = _join_spelled_out(words)
@@ -266,7 +282,9 @@ def normalize_shop_title(raw):
     case ("candy guy" is stored as "Candy Guy"). Blank is an error rather than
     a silent reset: a seller who clears the box should be told to pick one.
     """
-    value = re.sub(r"\s+", " ", str(raw or "")).strip()
+    # NFC so a title typed with decomposed accents ("i" + U+0301) is stored,
+    # counted and compared the same way as its precomposed spelling.
+    value = unicodedata.normalize("NFC", re.sub(r"\s+", " ", str(raw or ""))).strip()
     if not value:
         raise ValueError("pick a title for your shop")
     for preset in SHOP_TITLE_PRESETS:

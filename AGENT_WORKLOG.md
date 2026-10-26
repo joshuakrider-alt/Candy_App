@@ -645,7 +645,9 @@ DNS change; the Vercel connect half waits for the second project.
   after a rollback. It is applied only where this code boots, which is the
   staging API (Render deploys `staging`) and its staging Neon branch;
   production (`main`) is untouched. No SQL was run by hand.
-- Custom titles: 2-24 characters, letters/numbers/spaces/`' & . -`, a basic
+- Custom titles: 2-24 characters (stored NFC), letters in any script with
+  their combining marks (Codex finding on 10-26: Hindi titles were refused),
+  numbers, spaces and `' & . -`, a basic
   whole-word profanity filter (plus spelled-out runs like "f.u.c.k"), and no
   staff-sounding words (official, admin, support...). Rules in
   `backend/storefront.py`; length and character checks are repeated in

@@ -44,6 +44,10 @@ def test_new_shop_defaults_to_candy_shop(client):
         ("  CANDY   MAN ", "Candy Man"),
         ("Snack Auntie", "Snack Auntie"),
         ("Tía Dulce", "Tía Dulce"),
+        # Scripts that need combining marks, and decomposed accents, which are
+        # stored in their composed (NFC) form.
+        ("मिठाई वाली", "मिठाई वाली"),
+        ("Ti\u0301a Dulce", "Tía Dulce"),
     ],
 )
 def test_onboarding_accepts_presets_and_custom_titles(client, sent, stored):
@@ -95,6 +99,7 @@ def test_seller_changes_title_in_shop_settings(client, kiki_seller):
         "Candy 🍬",
         "<b>Candy</b>",
         "Candy_Lady",
+        "\u0301Candy",
         "Sh1t Shop",
         "f.u.c.k candy",
         "Bitch Candy",
