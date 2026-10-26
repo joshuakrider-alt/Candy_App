@@ -604,6 +604,35 @@ DNS change; the Vercel connect half waits for the second project.
 - Browser tests: 112 passed (10 new). Lint, typecheck and build clean.
 - No Vercel, Render, DNS or production settings changed. Cutover not started.
 
+## 2026-10-24 — In-site messaging inbox (Claude Code)
+
+- Ask 3 of Joshua's pre-cutover list, as its own PR into `staging`.
+- API: `backend/messaging.py` blueprint plus six new tables (created by
+  `db.create_all()` on boot, nothing existing altered). Support threads
+  (buyers and shops to admin, any admin answers as "Candy Lady support"),
+  shop-to-shop threads between approved shops, and one thread per paid order
+  between buyer and shop. Unread counts, read markers, block/unblock,
+  reports with an admin review list. Per-login rate limits and a 2000
+  character cap. Account deletion keeps the other side's history but
+  removes the link to the person.
+- Site: `/account/messages` inbox, thread and new-message pages,
+  `/admin/messages` support inbox with reported messages, an unread badge in
+  the header, account menu and dashboard nav, and "Message the shop" /
+  "Message the buyer" links on order cards and the pickup queue.
+- Email notices: the API had no email setup, so `backend/mailer.py`
+  (Resend HTTP API, stdlib only) is behind `MESSAGE_EMAIL_NOTIFICATIONS`,
+  off by default. Turning it on needs a Resend account, the domain verified
+  there (DNS records), and `RESEND_API_KEY` / `MESSAGE_EMAIL_FROM` /
+  optionally `SUPPORT_NOTIFY_EMAIL` on Render. None of that was done here.
+- Staging only: the new tables appear on the staging Neon branch when the
+  staging API next deploys from `staging`. No Vercel, Render, Neon, DNS or
+  production settings changed.
+- Codex review fixes in the same PR: messaging caches keyed by the signed-in
+  login, rate-limit checks serialized per login (row lock), read marker stops
+  at the newest message the browser showed (and is updated under a row
+  lock), inbox pages 50 at a time with previews fetched in one query.
+- API tests: 279 passed, 8 skipped (SQLite). Browser tests: 104 passed.
+
 ## 2026-10-24 — Shop title picker (Claude Code)
 
 - Joshua asked for each shop to choose how it is labeled, so the site is

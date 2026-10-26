@@ -15,6 +15,7 @@ import logging
 
 from flask import abort
 
+import messaging
 from models import Order, Seller, User, db
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,9 @@ def delete_account(user):
             # owner attached.
             seller.status = "pending"
             seller_delisted = True
+
+    # Their messages stay for the other side, without a link back to them.
+    messaging.forget_user(user)
 
     user_id = user.id
     db.session.delete(user)

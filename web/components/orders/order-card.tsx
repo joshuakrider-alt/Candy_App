@@ -73,6 +73,16 @@ export function OrderCard({
 
       <OrderItems order={order} />
 
+      {order.payment_status === "paid" || order.payment_status === "pay_at_pickup" || order.payment_status === "refunded" ? (
+        <Link
+          href={`/account/messages/new?order=${order.id}`}
+          prefetch={false}
+          className="self-start text-sm font-bold text-cherry-deep underline"
+        >
+          Message the shop
+        </Link>
+      ) : null}
+
       {canFinishPaying(order) && (
         <div className="flex flex-wrap gap-2">
           <Button onClick={onFinishPaying} disabled={busy} className="rounded-full font-extrabold">

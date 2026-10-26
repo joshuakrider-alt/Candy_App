@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -114,6 +115,15 @@ export function PickupQueue() {
                     <strong>{order.buyer_name}</strong> · {paidLabel(order)} · you keep {money(order.seller_payout_cents)}
                   </p>
                   <OrderItems order={order} />
+                  {order.user_id !== null && (
+                    <Link
+                      href={`/account/messages/new?order=${order.id}`}
+                      prefetch={false}
+                      className="self-start text-sm font-bold text-cherry-deep underline"
+                    >
+                      Message the buyer
+                    </Link>
+                  )}
                   {!!order.stock_shortfall && (
                     <p role="alert" className="text-sm font-bold text-destructive">
                       Short {order.stock_shortfall} item{order.stock_shortfall === 1 ? "" : "s"}: this payment came in after the

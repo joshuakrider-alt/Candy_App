@@ -579,3 +579,155 @@ class OrderItem(db.Model):
             "line_total_cents": (self.quantity or 0) * (self.unit_price_cents or 0),
             "candy": self.candy.to_dict() if self.candy else None,
         }
+
+
+# ----------------------------------------------------------------------
+# In-site messaging
+# ----------------------------------------------------------------------
+# A conversation is between "parties", not logins. A party is one of:
+#   ("user", user_id)    a buyer
+#   ("seller", seller_id) a shop: every login bound to that shop shares it
+#   ("support", None)    the platform; every admin answers as support
+# so a shop with two logins has one inbox, and any admin can pick up a
+# support thread. messaging.py owns who may talk to whom.
+
+CONVERSATION_KINDS = ("support", "seller", "order")
+PARTY_TYPES = ("user", "seller", "support")
+MESSAGE_REPORT_STATUSES = ("open", "resolved")
+
+
+class Conversation(db.Model):
+    __tablename__ = "conversation"
+    __table_args__ = (
+        db.CheckConstraint(
+            "kind IN ('support', 'seller', 'order')",
+            name="ck_conversation_kind",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), nullable=False)
+    subject = db.Column(db.String(120), nullable=False)
+    # Set for kind="order": the one thread about that order. Unique, so a
+    # buyer and a shop cannot end up with two threads about the same bag.
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), unique=True)
+    # Who opened it, for the daily new-conversation limit. NULL once that
+    # account is deleted.
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    last_message_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+
+    parties = db.relationship(
+        "ConversationParty",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
+    messages = db.relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.id",
+        lazy=True,
+    )
+
+
+class ConversationParty(db.Model):
+    __tablename__ = "conversation_party"
+    __table_args__ = (
+        db.CheckConstraint(
+            "party_type IN ('user', 'seller', 'support')",
+            name="ck_conversation_party_type",
+        ),
+        db.Index("ix_conversation_party_lookup", "party_type", "party_id"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(
+        db.Integer, db.ForeignKey("conversation.id"), nullable=False, index=True
+    )
+    party_type = db.Column(db.String(20), nullable=False)
+    # NULL for "support", and for a buyer whose account has been deleted.
+    party_id = db.Column(db.Integer)
+
+    conversation = db.relationship("Conversation", back_populates="parties")
+
+
+class Message(db.Model):
+    __tablename__ = "message"
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(
+        db.Integer, db.ForeignKey("conversation.id"), nullable=False, index=True
+    )
+    # The login that typed it, for rate limits and reports. NULL once that
+    # account is deleted; the party below still says which side sent it.
+    sender_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), index=True)
+    sender_party_type = db.Column(db.String(20), nullable=False)
+    sender_party_id = db.Column(db.Integer)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+
+    conversation = db.relationship("Conversation", back_populates="messages")
+    sender = db.relationship("User")
+
+
+class ConversationRead(db.Model):
+    """How far one login has read one conversation."""
+
+    __tablename__ = "conversation_read"
+    __table_args__ = (
+        db.UniqueConstraint("conversation_id", "user_id", name="uq_conversation_read"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey("conversation.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
+class MessageBlock(db.Model):
+    """One party refusing messages from another. Support is never blockable."""
+
+    __tablename__ = "message_block"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "blocker_type",
+            "blocker_id",
+            "blocked_type",
+            "blocked_id",
+            name="uq_message_block",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    blocker_type = db.Column(db.String(20), nullable=False)
+    blocker_id = db.Column(db.Integer, nullable=False)
+    blocked_type = db.Column(db.String(20), nullable=False)
+    blocked_id = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
+class MessageReport(db.Model):
+    """A message someone flagged for an admin to look at."""
+
+    __tablename__ = "message_report"
+    __table_args__ = (
+        db.UniqueConstraint("message_id", "reporter_user_id", name="uq_message_report"),
+        db.CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_message_report_status",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False, index=True)
+    # NULL once the reporter deletes their account; the report itself stays.
+    reporter_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reason = db.Column(db.String(500))
+    status = db.Column(db.String(20), nullable=False, default="open")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    resolved_at = db.Column(db.DateTime)
+    resolved_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    message = db.relationship("Message")

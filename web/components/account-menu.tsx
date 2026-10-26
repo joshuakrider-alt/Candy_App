@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { badgeText, useUnreadCount } from "@/components/messages/use-unread";
 import { auth } from "@/lib/api";
 import { useRefreshSession, useSession } from "@/lib/use-session";
 
@@ -22,6 +23,7 @@ export function AccountMenu() {
   const { data, isPending } = useSession();
   const refresh = useRefreshSession();
   const router = useRouter();
+  const unread = useUnreadCount();
 
   if (isPending) return <Skeleton className="h-9 w-24 rounded-full" />;
 
@@ -56,6 +58,12 @@ export function AccountMenu() {
         <DropdownMenuGroup>
           <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
           <DropdownMenuItem render={<Link href="/account/orders" />}>Your orders</DropdownMenuItem>
+          <DropdownMenuItem render={<Link href={user.role === "admin" ? "/admin/messages" : "/account/messages"} />}>
+            Messages
+            {unread > 0 && (
+              <span className="ml-auto rounded-full bg-cherry-deep px-2 text-xs font-extrabold text-white">{badgeText(unread)}</span>
+            )}
+          </DropdownMenuItem>
           {(user.role === "seller" || user.role === "admin") && (
             <DropdownMenuItem render={<Link href="/seller" />}>Seller dashboard</DropdownMenuItem>
           )}
