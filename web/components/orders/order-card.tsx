@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { OrderItems } from "@/components/orders/order-summary";
 import { STEPS, canFinishPaying, orderStatusLine, stepIndex } from "@/components/orders/order-status";
 import { PickupCode } from "@/components/orders/pickup-code";
+import { PickupPlace } from "@/components/orders/pickup-place";
 import type { Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ShopTitle } from "@/components/shop/shop-title";
@@ -70,18 +71,32 @@ export function OrderCard({
           Ready at {order.seller.shop_name}, {order.seller.pickup_window}.
         </p>
       )}
+      {/* The street address only arrives once the order is paid. */}
+      {order.pickup_code && order.status !== "completed" && <PickupPlace order={order} className="p-3" showTitle={false} />}
 
       <OrderItems order={order} />
 
-      {order.payment_status === "paid" || order.payment_status === "pay_at_pickup" || order.payment_status === "refunded" ? (
-        <Link
-          href={`/account/messages/new?order=${order.id}`}
-          prefetch={false}
-          className="self-start text-sm font-bold text-cherry-deep underline"
-        >
-          Message the shop
-        </Link>
-      ) : null}
+      {(order.pickup_code ||
+        order.payment_status === "paid" ||
+        order.payment_status === "pay_at_pickup" ||
+        order.payment_status === "refunded") && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {order.pickup_code && (
+            <Link href={`/account/orders/${order.id}`} className="text-sm font-bold text-cherry-deep underline">
+              View receipt
+            </Link>
+          )}
+          {(order.payment_status === "paid" || order.payment_status === "pay_at_pickup" || order.payment_status === "refunded") && (
+            <Link
+              href={`/account/messages/new?order=${order.id}`}
+              prefetch={false}
+              className="text-sm font-bold text-cherry-deep underline"
+            >
+              Message the shop
+            </Link>
+          )}
+        </div>
+      )}
 
       {canFinishPaying(order) && (
         <div className="flex flex-wrap gap-2">

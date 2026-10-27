@@ -10,6 +10,7 @@ async function apply(page: Page, shop: string) {
   await page.getByLabel("Your name").fill("Tess Tester");
   await page.getByLabel("Neighborhood").fill("Riverside");
   await page.getByLabel("Pickup times").fill("Saturdays");
+  await page.getByLabel("Pickup address").fill("5 Riverside Ct");
   await page.getByLabel("Email").fill(`${shop.toLowerCase().replace(/\W+/g, "-")}@example.com`);
   await page.getByLabel("Password (at least 8 characters)").fill("tester-password");
   await page.getByLabel("Type it again").fill("tester-password");
@@ -31,6 +32,8 @@ test("an admin approves one application and turns down another", async ({ page, 
 
   await signIn(page, "admin");
   await expect(page).toHaveURL("/admin");
+  // The admin sees the private pickup address the shop applied with.
+  await expect(page.getByRole("listitem", { name: approve })).toContainText("Pickup: 5 Riverside Ct");
   await page.getByRole("listitem", { name: approve }).getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(`${approve} is live.`)).toBeVisible();
   await expect(page.getByRole("listitem", { name: approve })).toHaveCount(0);

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormMessage, Panel } from "@/components/panel";
+import { PICKUP_ADDRESS_MAX, PICKUP_NOTE_MAX } from "@/components/seller/pickup-details-form";
 import { ShopTitlePicker } from "@/components/seller/shop-title-picker";
 import { DEFAULT_SHOP_TITLE, cleanShopTitle, shopTitleProblem } from "@/lib/shop-title";
 import { errorText } from "@/lib/error-text";
@@ -49,6 +50,8 @@ export function ApplyForm() {
         contact_name: text("contact_name"),
         neighborhood: text("neighborhood"),
         pickup_window: text("pickup_window"),
+        pickup_address: text("pickup_address"),
+        pickup_note: text("pickup_note"),
         email: text("email"),
         password,
       });
@@ -95,6 +98,28 @@ export function ApplyForm() {
           <label className={field}>
             Pickup times
             <Input name="pickup_window" required placeholder="Weekdays, 2:30 PM to 7:00 PM" className="h-11 bg-white" />
+          </label>
+        </div>
+      </Panel>
+      <Panel
+        title="Where buyers pick up"
+        description="Kept private. Only buyers who have paid for an order see it; your shop page shows just your neighborhood."
+      >
+        <div className="flex flex-col gap-3">
+          <label className={field}>
+            Pickup address
+            <Input
+              name="pickup_address"
+              required
+              maxLength={PICKUP_ADDRESS_MAX}
+              autoComplete="street-address"
+              placeholder="123 Cherry Ln, Apt 2"
+              className="h-11 bg-white"
+            />
+          </label>
+          <label className={field}>
+            Pickup note (optional)
+            <Input name="pickup_note" maxLength={PICKUP_NOTE_MAX} placeholder="Ring the side door" className="h-11 bg-white" />
           </label>
         </div>
       </Panel>

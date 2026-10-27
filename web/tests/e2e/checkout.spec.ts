@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { E2E_PASSWORDS } from "../../playwright.config";
 import { sessionCookie, signIn } from "./fixtures";
 
 // Testing and acceptance flows 4, 5, 7 and 8 as far as they can run without
@@ -36,6 +37,7 @@ const paidOrder = {
     },
   ],
   seller: { id: 1, shop_name: "Ms. Kiki's Snack Spot", neighborhood: "Cherry Hill", pickup_window: "Weekdays, 2:30 PM - 7:00 PM", slug: "ms-kikis-snack-spot" },
+  pickup: { address: "100 Example Ave, Cherry Hill", note: "Ring the side door" },
 };
 
 async function addToCart(page: Page, name: string) {
@@ -104,6 +106,8 @@ test("flow 4 and 7: Pay goes to Stripe from the shop page, and the return shows 
   await expect(page.getByRole("heading", { name: "Show this code at pickup" })).toBeVisible();
   await expect(page.getByText("CL-AB2CD")).toBeVisible();
   await expect(page.getByText("Weekdays, 2:30 PM - 7:00 PM")).toBeVisible();
+  await expect(page.getByTestId("pickup-address")).toHaveText("100 Example Ave, Cherry Hill");
+  await expect(page.getByText("Ring the side door")).toBeVisible();
   // The cart empties once the payment is confirmed.
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cl-cart")!).state.lines)).toEqual([]);
 });
@@ -150,7 +154,7 @@ test("/account/orders shows the status line, pickup code and Finish paying", asy
     route.fulfill({
       json: [
         { ...paidOrder, status: "ready" },
-        { ...paidOrder, id: 41, payment_status: "pending", pickup_code: null },
+        { ...paidOrder, id: 41, payment_status: "pending", pickup_code: null, pickup: null },
       ],
     }),
   );
@@ -161,6 +165,73 @@ test("/account/orders shows the status line, pickup code and Finish paying", asy
   const pending = page.locator("article").filter({ hasText: "Order #41" });
   await expect(pending.getByText("Waiting for payment")).toBeVisible();
   await expect(pending.getByRole("button", { name: "Finish paying" })).toBeVisible();
+  // The street address is on the paid order only; the unpaid one shows the neighborhood.
+  await expect(ready.getByTestId("pickup-address")).toHaveText("100 Example Ave, Cherry Hill");
+  await expect(ready.getByText("Ring the side door")).toBeVisible();
+  await expect(pending.getByText("100 Example Ave")).toHaveCount(0);
+  await expect(pending.getByRole("link", { name: "View receipt" })).toHaveCount(0);
+  await ready.getByRole("link", { name: "View receipt" }).click();
+  await expect(page).toHaveURL("/account/orders/42");
+});
+
+test("the receipt shows the pickup address for a paid order and nothing for an unpaid one", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await page.route("**/api/flask/orders/42", (route) => route.fulfill({ json: paidOrder }));
+  await page.route("**/api/flask/orders/41", (route) =>
+    route.fulfill({ json: { ...paidOrder, id: 41, payment_status: "pending", pickup_code: null, pickup: null } }),
+  );
+
+  await page.goto("/account/orders/42");
+  await expect(page.getByRole("heading", { name: "Order #42" })).toBeVisible();
+  await expect(page.getByTestId("pickup-address")).toHaveText("100 Example Ave, Cherry Hill");
+  await expect(page.getByText("Ring the side door")).toBeVisible();
+  await expect(page.getByText("CL-AB2CD")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Print" })).toBeVisible();
+
+  await page.goto("/account/orders/41");
+  await expect(page.getByRole("heading", { name: "No receipt for order #41" })).toBeVisible();
+  await expect(page.getByText("100 Example Ave")).toHaveCount(0);
+});
+
+test("signing out drops the last account's cached receipt, so the next account cannot see its address", async ({ page }) => {
+  let allowed = true;
+  let fetches = 0;
+  await page.route("**/api/flask/orders/42", (route) => {
+    fetches += 1;
+    return allowed
+      ? route.fulfill({ json: paidOrder })
+      : route.fulfill({ status: 403, json: { error: "you do not have access to this order" } });
+  });
+  await signIn(page, "buyer", "/account/orders/42");
+  await expect(page.getByTestId("pickup-address")).toHaveText("100 Example Ave, Cherry Hill");
+
+  // Same tab, no reload: sign out from the menu and sign in as someone else.
+  await page.getByRole("button", { name: "Alice" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.waitForURL("**/login");
+  allowed = false;
+  await page.getByLabel("Email").fill("bob@example.com");
+  await page.getByLabel("Password").fill(E2E_PASSWORDS.buyer);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL("**/shops");
+
+  // A client-side visit keeps the React Query cache, which is where a stale receipt would come from.
+  const before = fetches;
+  await page.evaluate(() => (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push("/account/orders/42"));
+  await page.waitForURL("**/account/orders/42");
+  await expect(page.getByText(/do not have access to this order/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("100 Example Ave")).toHaveCount(0);
+  expect(fetches).toBeGreaterThan(before);
+});
+
+test("a paid order from a shop with no address yet says it will appear", async ({ page }) => {
+  await signIn(page, "buyer");
+  await page.waitForURL("**/shops");
+  await page.route("**/api/flask/orders/42", (route) => route.fulfill({ json: { ...paidOrder, pickup: null } }));
+  await page.goto("/account/orders/42");
+  await expect(page.getByText("Cherry Hill", { exact: true })).toBeVisible();
+  await expect(page.getByText("The shop hasn't added its street address yet")).toBeVisible();
 });
 
 test("a new buyer sees no orders, can change their password, and can delete the account", async ({ page }) => {

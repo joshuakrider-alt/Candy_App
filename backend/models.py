@@ -50,6 +50,11 @@ FULFILLABLE_PAYMENT_STATUSES = ("paid", "pay_at_pickup")
 
 PICKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+# A shop's street address and door note. Private: they go only to the owner,
+# an admin, and buyers holding a paid order (see Order.pickup_dict).
+PICKUP_ADDRESS_MAX_LENGTH = 300
+PICKUP_NOTE_MAX_LENGTH = 200
+
 
 def category_for_name(name):
     text = (name or "").lower()
@@ -190,6 +195,10 @@ class Seller(db.Model):
     neighborhood = db.Column(db.String(120), nullable=False)
     pickup_window = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), nullable=False, default="pending")
+    # Where to actually collect an order. The public pages only ever show the
+    # neighborhood; these two are released per order, once it is paid.
+    pickup_address = db.Column(db.String(PICKUP_ADDRESS_MAX_LENGTH))
+    pickup_note = db.Column(db.String(PICKUP_NOTE_MAX_LENGTH))
 
     # The shopfront face: one photo of the person buyers will meet at pickup.
     # Distinct from the selfie Stripe Identity takes, which stays at Stripe.
@@ -326,6 +335,8 @@ class Seller(db.Model):
             data["contact_email"] = self.contact_email
             data["profile_photo_status"] = self.profile_photo_status
             data["identity_status"] = self.identity_status
+            data["pickup_address"] = self.pickup_address
+            data["pickup_note"] = self.pickup_note
             # Owner/admin only: buyers do not need to see payout plumbing.
             data["connect"] = self.connect_dict()
         return data
@@ -556,6 +567,18 @@ class Order(db.Model):
         else:
             data["pickup_code"] = None
         return data
+
+    def pickup_dict(self):
+        """The shop's private address and note, for whoever may see this order.
+
+        Same gate as the pickup code: nothing until the order is paid (or is a
+        legacy pay-at-pickup order), so an abandoned or refunded checkout never
+        reveals where a seller lives. None when there is nothing to show yet.
+        """
+        seller = self.seller
+        if not self.is_fulfillable or seller is None or not seller.pickup_address:
+            return None
+        return {"address": seller.pickup_address, "note": seller.pickup_note}
 
 
 class OrderItem(db.Model):
