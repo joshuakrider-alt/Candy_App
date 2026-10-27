@@ -304,6 +304,24 @@ Seller fields (all optional or defaulted, added by boot migrations):
 `PUT /sellers/<id>/storefront` (owner or admin) edits them; send `null`/`""`
 to clear an optional one.
 
+### Private pickup address
+
+`pickup_address` (up to 300 characters, line breaks kept) and `pickup_note`
+(up to 200, e.g. "ring the side door") are where a buyer actually collects an
+order. They are never part of the public shop: `/sellers`, `/shops`,
+`/shops/<slug>` and `/sellers/<id>/storefront` show only the neighborhood.
+They come back to the shop's owner and admins (`GET /me`, `GET /applications`),
+and to a buyer as `order.pickup = {"address", "note"}` on `GET /orders/<id>`,
+`GET /me/orders`, `POST /orders/<id>/payment/confirm` and the other order
+routes, only once the order is paid (or a legacy pay-at-pickup order). An
+unpaid, expired or refunded order gets `pickup: null`, and so does a paid order
+from a shop that has not filled the address in.
+
+`POST /applications` takes both (optional there so older clients still work;
+the web form requires the address). `PUT /sellers/<id>/pickup` (owner or
+admin) edits them, partial like the storefront route; `null`/`""` clears one.
+Existing shops start with both empty, and the seller dashboard prompts them.
+
 Hooks for guided self-serve onboarding (later PR): a shop's `slug` and
 `connect.status` are everything a signup funnel needs to show "your link" and
 "finish payouts"; approval is still the admin step that makes both live.
@@ -382,6 +400,7 @@ Signed in:
 - `POST /orders`, `POST /orders/<id>/checkout`, `POST /orders/<id>/payment/confirm`, `POST /orders/<id>/cancel` (buyer)
 - `GET /sellers/<id>/inventory`, `PUT /sellers/<id>/inventory/<candy_id>`, `GET /sellers/<id>/orders`, `PUT /orders/<id>/status` (that shop's seller, or admin)
 - `PUT /sellers/<id>/storefront` — slug, tagline, theme, logo (that shop's seller, or admin)
+- `PUT /sellers/<id>/pickup` — private pickup address and note (that shop's seller, or admin)
 - `POST /sellers/<id>/stripe/connect`, `GET /sellers/<id>/stripe/status`, `POST /sellers/<id>/stripe/dashboard` — Connect onboarding, status refresh, Express dashboard link (that shop's seller, or admin)
 
 - `GET /messages/unread` — unread count for the nav

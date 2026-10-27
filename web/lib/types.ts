@@ -76,6 +76,9 @@ export type Seller = {
   contact_email?: string | null;
   profile_photo_status?: PhotoStatus;
   identity_status?: IdentityStatus;
+  /** Owner/admin only, and null until the shop fills it in. */
+  pickup_address?: string | null;
+  pickup_note?: string | null;
   connect?: SellerConnect;
 };
 
@@ -128,7 +131,13 @@ export type OrderItem = {
   candy: Candy | null;
 };
 
-/** Order.to_dict(), plus the seller and checkout_url that order_response() adds. */
+/** Order.pickup_dict(): the shop's private address, released once the order is paid. */
+export type PickupDetails = {
+  address: string;
+  note: string | null;
+};
+
+/** Order.to_dict(), plus the seller, pickup and checkout_url that order_response() adds. */
 export type Order = {
   id: number;
   user_id: number | null;
@@ -150,6 +159,8 @@ export type Order = {
   /** Only set once the order is paid; null before. */
   pickup_code: string | null;
   seller?: Seller | null;
+  /** Null until the order is paid, and null if the shop has no address on file. */
+  pickup?: PickupDetails | null;
   checkout_url?: string;
 };
 
