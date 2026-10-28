@@ -210,4 +210,7 @@ def confirm_reset():
 
 def forget_user(user):
     """Drop a deleted login's reset tokens. Flushes, never commits."""
+    # The login's row first, then its tokens: the same lock order as _issue
+    # and confirm_reset, so a reset racing the deletion cannot deadlock.
+    db.session.query(User.id).filter(User.id == user.id).with_for_update().one()
     PasswordResetToken.query.filter_by(user_id=user.id).delete(synchronize_session=False)
