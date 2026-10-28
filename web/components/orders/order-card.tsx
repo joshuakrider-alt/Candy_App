@@ -8,6 +8,7 @@ import { PickupCode } from "@/components/orders/pickup-code";
 import { PickupPlace } from "@/components/orders/pickup-place";
 import type { Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ShopTitle } from "@/components/shop/shop-title";
 
 const TONE = {
   wait: "bg-lemon text-cola",
@@ -35,6 +36,7 @@ export function OrderCard({
     <article className="flex flex-col gap-4 rounded-lg bg-paper/95 p-5 shadow-candy">
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
+          <ShopTitle title={order.seller?.shop_title} className="mb-1" />
           <h2 className="font-heading text-xl font-extrabold text-cola">
             {order.seller?.slug ? (
               <Link href={`/s/${order.seller.slug}`} className="hover:underline">
@@ -70,7 +72,7 @@ export function OrderCard({
         </p>
       )}
       {/* The street address only arrives once the order is paid. */}
-      {order.pickup_code && order.status !== "completed" && <PickupPlace order={order} className="p-3" />}
+      {order.pickup_code && order.status !== "completed" && <PickupPlace order={order} className="p-3" showTitle={false} />}
 
       <OrderItems order={order} />
 

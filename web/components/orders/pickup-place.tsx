@@ -1,4 +1,5 @@
 import { Clock, DoorOpen, MapPin } from "lucide-react";
+import { ShopTitle } from "@/components/shop/shop-title";
 import type { Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -7,11 +8,21 @@ import { cn } from "@/lib/utils";
  * the order is paid, so before that (or for a shop that has not filled its
  * address in yet) this falls back to the public neighborhood.
  */
-export function PickupPlace({ order, className }: { order: Order; className?: string }) {
+export function PickupPlace({
+  order,
+  className,
+  showTitle = true,
+}: {
+  order: Order;
+  className?: string;
+  /** Off where the shop's title is already shown just above, as on order cards. */
+  showTitle?: boolean;
+}) {
   const { seller, pickup } = order;
   if (!seller) return null;
   return (
     <div className={cn("flex flex-col gap-1 rounded-md bg-muted p-4 text-cola", className)}>
+      {showTitle && <ShopTitle title={seller.shop_title} className="self-start" />}
       <p className="font-heading text-xl font-bold">{seller.shop_name}</p>
       {pickup ? (
         <p className="flex items-start gap-1.5 text-sm font-bold">

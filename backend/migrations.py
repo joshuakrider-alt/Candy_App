@@ -87,6 +87,11 @@ NEW_COLUMNS = (
     # dashboard asks each shop to fill these in.
     ("seller", "pickup_address", "VARCHAR(300)"),
     ("seller", "pickup_note", "VARCHAR(200)"),
+    # Shop title picker. The constant default labels every existing shop
+    # "Candy Lady", exactly as the site already did, and lets the previous
+    # release keep inserting shops after a rollback. New shops get
+    # "Candy Shop" from the application code, not from this default.
+    ("seller", "shop_title", "VARCHAR(40) NOT NULL DEFAULT 'Candy Lady'"),
 )
 
 

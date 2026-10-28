@@ -173,3 +173,124 @@ def readable_text_on(hex_color):
     luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
     # Contrast against white vs. against black; pick the larger.
     return "#ffffff" if (1.05 / (luminance + 0.05)) >= ((luminance + 0.05) / 0.05) else "#1a1a1a"
+
+
+# How a shop is labeled on its page, its /shops card, orders and messages.
+# It is a title the seller picks, not a question about who they are: nothing
+# here (or anywhere) asks for or stores a seller's gender.
+SHOP_TITLE_PRESETS = ("Candy Lady", "Candy Woman", "Candy Guy", "Candy Man", "Candy Shop")
+# Every shop that existed before titles keeps the site's original wording, and
+# it is also the column's database default, so code from before this change
+# can still insert shops after a rollback without knowing the column exists.
+LEGACY_SHOP_TITLE = "Candy Lady"
+# Preselected for new shops in onboarding and used when an application leaves
+# the field out.
+DEFAULT_SHOP_TITLE = "Candy Shop"
+SHOP_TITLE_MIN_LENGTH = 2
+SHOP_TITLE_MAX_LENGTH = 24
+
+# Letters (any script, with the combining marks scripts like Devanagari need),
+# digits, spaces and a little punctuation a title might reasonably use.
+# Anything else (emoji, symbols, markup) is refused rather than stripped, so
+# the seller sees exactly what will be shown.
+SHOP_TITLE_PUNCTUATION = frozenset(" '’&.-")
+
+
+def _title_shape_ok(title):
+    """Starts with a letter or digit, ends with one (or a single "."), and
+    holds only letters, marks, digits and SHOP_TITLE_PUNCTUATION between."""
+    def word_char(char):
+        return unicodedata.category(char)[0] in "LN"
+
+    def joins_word(char):
+        return unicodedata.category(char)[0] in "LMN"
+
+    body = title[:-1] if title.endswith(".") and len(title) > 1 else title
+    if not word_char(body[0]) or not joins_word(body[-1]):
+        return False
+    return all(joins_word(char) or char in SHOP_TITLE_PUNCTUATION for char in body)
+
+# A basic filter, not a moderation system: it stops the obvious cases and
+# leaves the rest to admin review. Whole words only, so "Scunthorpe"-style
+# false positives (a "Grass Hopper Candy" title) do not trip it.
+_BLOCKED_WORDS = frozenset(
+    {
+        "ass", "asses", "asshole", "bastard", "bitch", "bitches", "bollocks",
+        "boner", "boob", "boobs", "butthole", "cock", "cocks", "crap", "cum",
+        "cunt", "damn", "dick", "dicks", "dildo", "dyke", "fag", "fags",
+        "faggot", "fuck", "fucker", "fucking", "fucks", "goddamn", "hoe",
+        "hoes", "jizz", "kike", "milf", "motherfucker", "nazi", "nigga",
+        "nigger", "piss", "porn", "pussy", "rape", "retard", "sex", "sexy",
+        "shit", "shits", "shitty", "slut", "sluts", "spic", "tit", "tits",
+        "titty", "twat", "whore", "whores", "wank", "wanker",
+    }
+)
+# Roots that are never innocent inside a longer word ("Candy Fuckboy"). Runs
+# of single letters are joined first so "f.u.c.k" or "s h i t" are caught,
+# but separate words are not, so "Push It Candy" stays allowed.
+_BLOCKED_ROOTS = ("fuck", "shit", "cunt", "nigg", "faggot", "motherf", "whore")
+# Titles that would read as speaking for the site itself.
+_RESERVED_TITLE_WORDS = frozenset({"admin", "administrator", "moderator", "official", "staff", "support"})
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "i"})
+
+
+def _title_words(value):
+    lowered = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").lower()
+    lowered = lowered.translate(_LEET)
+    return re.findall(r"[a-z]+", lowered)
+
+
+def _join_spelled_out(words):
+    """["f", "u", "c", "k", "candy"] -> ["fuck", "candy"]: glue letter runs."""
+    pieces, run = [], ""
+    for word in words:
+        if len(word) == 1:
+            run += word
+            continue
+        if run:
+            pieces.append(run)
+            run = ""
+        pieces.append(word)
+    if run:
+        pieces.append(run)
+    return pieces
+
+
+def shop_title_problem(title):
+    """Why a custom title is unacceptable, or None. Presets always pass."""
+    if title in SHOP_TITLE_PRESETS:
+        return None
+    if len(title) < SHOP_TITLE_MIN_LENGTH or len(title) > SHOP_TITLE_MAX_LENGTH:
+        return f"title must be {SHOP_TITLE_MIN_LENGTH}-{SHOP_TITLE_MAX_LENGTH} characters"
+    if not _title_shape_ok(title):
+        return "title may only use letters, numbers, spaces and ' & . -"
+    words = _title_words(title)
+    pieces = _join_spelled_out(words)
+    if any(word in _BLOCKED_WORDS for word in pieces) or any(
+        root in word for word in pieces for root in _BLOCKED_ROOTS
+    ):
+        return "please pick a different title"
+    if any(word in _RESERVED_TITLE_WORDS for word in words):
+        return "that title sounds like site staff; pick another"
+    return None
+
+
+def normalize_shop_title(raw):
+    """The title to store, or raise ValueError.
+
+    Trims and collapses inner whitespace, and matches a preset regardless of
+    case ("candy guy" is stored as "Candy Guy"). Blank is an error rather than
+    a silent reset: a seller who clears the box should be told to pick one.
+    """
+    # NFC so a title typed with decomposed accents ("i" + U+0301) is stored,
+    # counted and compared the same way as its precomposed spelling.
+    value = unicodedata.normalize("NFC", re.sub(r"\s+", " ", str(raw or ""))).strip()
+    if not value:
+        raise ValueError("pick a title for your shop")
+    for preset in SHOP_TITLE_PRESETS:
+        if value.casefold() == preset.casefold():
+            return preset
+    problem = shop_title_problem(value)
+    if problem:
+        raise ValueError(problem)
+    return value

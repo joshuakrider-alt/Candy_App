@@ -10,6 +10,9 @@ import { FormMessage, Panel } from "@/components/panel";
 import { errorText } from "@/lib/error-text";
 import { useSellerId, useSellerShop, useSetSellerShop } from "@/components/seller/seller-shop";
 import { ShopLogo } from "@/components/shop/shop-logo";
+import { ShopTitle } from "@/components/shop/shop-title";
+import { ShopTitlePicker } from "@/components/seller/shop-title-picker";
+import { cleanShopTitle, isPresetTitle, shopTitleProblem } from "@/lib/shop-title";
 import { refreshShopPages } from "@/app/actions/refresh-shops";
 import { api } from "@/lib/api";
 import { isHexColor } from "@/lib/format";
@@ -40,7 +43,19 @@ const isHttpsUrl = (value: string) => {
   }
 };
 
-function Preview({ seller, tagline, logoUrl, theme }: { seller: Seller; tagline: string; logoUrl: string; theme: SellerTheme }) {
+function Preview({
+  seller,
+  title,
+  tagline,
+  logoUrl,
+  theme,
+}: {
+  seller: Seller;
+  title: string;
+  tagline: string;
+  logoUrl: string;
+  theme: SellerTheme;
+}) {
   const style = theme.primary ? { background: theme.primary, color: theme.on_primary ?? "#ffffff" } : undefined;
   return (
     <div
@@ -56,6 +71,7 @@ function Preview({ seller, tagline, logoUrl, theme }: { seller: Seller; tagline:
           className="size-16 ring-4 ring-white/70"
         />
         <div className="min-w-0">
+          <ShopTitle title={title} />
           <p className="font-heading text-2xl leading-tight font-extrabold">{seller.shop_name}</p>
           {tagline && <p className="opacity-90">{tagline}</p>}
         </div>
@@ -87,6 +103,8 @@ export function StorefrontForm() {
   const setShop = useSetSellerShop();
 
   const [slug, setSlug] = useState(seller.slug ?? "");
+  const [title, setTitle] = useState(seller.shop_title ?? "");
+  const [customTitle, setCustomTitle] = useState(!!seller.shop_title && !isPresetTitle(seller.shop_title));
   const [tagline, setTagline] = useState(seller.tagline ?? "");
   const [logoUrl, setLogoUrl] = useState(seller.logo_url ?? "");
   const [custom, setCustom] = useState(isHexColor(seller.theme.primary) || isHexColor(seller.theme.accent));
@@ -110,11 +128,17 @@ export function StorefrontForm() {
       setError("Use 3 to 48 lowercase letters, numbers and single dashes for the address.");
       return;
     }
+    const titleProblem = shopTitleProblem(title);
+    if (titleProblem) {
+      setError(titleProblem);
+      return;
+    }
     if (logoUrl.trim() && !isHttpsUrl(logoUrl.trim())) {
       setError("The logo must be an https:// link to an image.");
       return;
     }
     const body: Record<string, unknown> = {
+      shop_title: cleanShopTitle(title),
       tagline: tagline.trim(),
       logo_url: logoUrl.trim(),
       theme_primary: custom ? primary : null,
@@ -172,6 +196,14 @@ export function StorefrontForm() {
       <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
         <Panel title="Shop page">
           <form onSubmit={save} className="flex flex-col gap-3">
+            <ShopTitlePicker
+              value={title}
+              custom={customTitle}
+              onChange={(next, custom) => {
+                setTitle(next);
+                setCustomTitle(custom);
+              }}
+            />
             <label className="flex flex-col gap-1.5 text-sm font-bold text-cola">
               Address (the part after /s/)
               <Input
@@ -229,7 +261,7 @@ export function StorefrontForm() {
         </Panel>
         <div className="flex flex-col gap-2">
           <p className="text-sm font-bold text-muted-foreground">Preview</p>
-          <Preview seller={seller} tagline={tagline.trim()} logoUrl={logoUrl.trim()} theme={theme} />
+          <Preview seller={seller} title={cleanShopTitle(title)} tagline={tagline.trim()} logoUrl={logoUrl.trim()} theme={theme} />
         </div>
       </div>
     </>

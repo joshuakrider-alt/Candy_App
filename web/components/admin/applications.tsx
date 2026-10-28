@@ -18,6 +18,7 @@ import { refreshShopPages } from "@/app/actions/refresh-shops";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/error-text";
 import type { Seller, SellerConnect } from "@/lib/types";
+import { ShopTitle } from "@/components/shop/shop-title";
 
 const PAYOUTS: Record<SellerConnect["status"], string> = {
   unstarted: "Stripe not connected",
@@ -90,6 +91,7 @@ export function Applications() {
               >
                 <div className="min-w-0 flex-1 text-sm text-cola">
                   <h3 className="font-heading text-lg font-extrabold">{seller.shop_name}</h3>
+                  <ShopTitle title={seller.shop_title} />
                   <p>
                     {seller.neighborhood} · {seller.pickup_window}
                   </p>

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormMessage, Panel } from "@/components/panel";
 import { PICKUP_ADDRESS_MAX, PICKUP_NOTE_MAX } from "@/components/seller/pickup-details-form";
+import { ShopTitlePicker } from "@/components/seller/shop-title-picker";
+import { DEFAULT_SHOP_TITLE, cleanShopTitle, shopTitleProblem } from "@/lib/shop-title";
 import { errorText } from "@/lib/error-text";
 import { api, auth } from "@/lib/api";
 import { useRefreshSession } from "@/lib/use-session";
@@ -21,6 +23,9 @@ export function ApplyForm() {
   const refreshSession = useRefreshSession();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // New shops start as "Candy Shop"; the seller can pick another or their own.
+  const [title, setTitle] = useState<string>(DEFAULT_SHOP_TITLE);
+  const [customTitle, setCustomTitle] = useState(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,11 +36,17 @@ export function ApplyForm() {
       setError("The two passwords don't match.");
       return;
     }
+    const titleProblem = shopTitleProblem(title);
+    if (titleProblem) {
+      setError(titleProblem);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await api.post("/applications", {
         shop_name: text("shop_name"),
+        shop_title: cleanShopTitle(title),
         contact_name: text("contact_name"),
         neighborhood: text("neighborhood"),
         pickup_window: text("pickup_window"),
@@ -68,6 +79,14 @@ export function ApplyForm() {
             Shop name
             <Input name="shop_name" required maxLength={200} placeholder="Ms. Kiki's Snack Spot" className="h-11 bg-white" />
           </label>
+          <ShopTitlePicker
+            value={title}
+            custom={customTitle}
+            onChange={(next, custom) => {
+              setTitle(next);
+              setCustomTitle(custom);
+            }}
+          />
           <label className={field}>
             Your name
             <Input name="contact_name" required autoComplete="name" placeholder="Kiana Roberts" className="h-11 bg-white" />

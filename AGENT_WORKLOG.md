@@ -659,6 +659,39 @@ DNS change; the Vercel connect half waits for the second project.
 - API tests: 274 passed, 8 skipped (SQLite). Browser tests: 110 passed.
 - No Vercel, Render, DNS or production changes. Cutover not started.
 
+## 2026-10-24 — Shop title picker (Claude Code)
+
+- Joshua asked for each shop to choose how it is labeled, so the site is
+  inclusive: Candy Lady, Candy Woman, Candy Guy, Candy Man, Candy Shop, or a
+  custom title. No one is asked for their gender; it is only a title.
+- New column `seller.shop_title VARCHAR(40) NOT NULL DEFAULT 'Candy Lady'`,
+  added by the boot migration in `backend/migrations.py`. Existing shops read
+  "Candy Lady" with no backfill; new shops get "Candy Shop" from the app code.
+  The constant default means the previous release can keep inserting shops
+  after a rollback. It is applied only where this code boots, which is the
+  staging API (Render deploys `staging`) and its staging Neon branch;
+  production (`main`) is untouched. No SQL was run by hand.
+- Custom titles: 2-24 characters (stored NFC), letters in any script with
+  their combining marks (Codex finding on 10-26: Hindi titles were refused),
+  numbers, spaces and `' & . -`, a basic
+  whole-word profanity filter (plus spelled-out runs like "f.u.c.k"), and no
+  staff-sounding words (official, admin, support...). Rules in
+  `backend/storefront.py`; length and character checks are repeated in
+  `web/lib/shop-title.ts` for instant form errors.
+- API: `shop_title` in `Seller.to_dict` (so storefront, `/sellers`, `/me`,
+  orders) and in `/shops`; accepted by `POST /applications` and
+  `PUT /sellers/<id>/storefront`.
+- Web: picker on `/sell/apply` (Candy Shop preselected) and
+  `/seller/storefront`; title shown on `/s/<slug>`, `/shops` cards, order
+  cards, the checkout return page, the seller dashboard header and admin
+  applications. Site brand stays Neighborhood Candy Lady.
+- Messages: PR #40 (inbox) is not in staging yet, so its names are not
+  touched here; once it merges, a small follow-up adds the title there.
+- Tests: API 282 passed, 9 skipped (SQLite); Postgres migration and title
+  tests pass on a local Postgres; web typecheck, lint, build pass; Playwright
+  104 of 104 pass. No Vercel, Render, Stripe or DNS settings changed.
+  Cutover not started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or
