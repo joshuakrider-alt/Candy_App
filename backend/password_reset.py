@@ -165,17 +165,37 @@ def confirm_reset():
         abort(400, description=INVALID_TOKEN)
     password = validate_password(data.get("password"))
 
-    # Locked so two submits of the same link cannot both succeed.
-    row = (
-        PasswordResetToken.query.filter_by(token_hash=hash_token(raw))
+    token_hash = hash_token(raw)
+    found = PasswordResetToken.query.filter_by(token_hash=token_hash).first()
+    if found is None:
+        abort(400, description=INVALID_TOKEN)
+    user_id = found.user_id
+    db.session.rollback()
+
+    # Locks in the same order as _issue (the login's row, then its tokens), so
+    # a reset and a new link for the same account cannot deadlock. The token is
+    # then re-read under the lock, so two submits of one link cannot both win.
+    user = (
+        db.session.query(User)
+        .filter(User.id == user_id)
         .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    row = (
+        PasswordResetToken.query.filter_by(token_hash=token_hash)
+        .with_for_update()
+        .populate_existing()
         .first()
     )
     now = utcnow()
-    if row is None or row.used_at is not None or row.expires_at <= now:
-        abort(400, description=INVALID_TOKEN)
-    user = db.session.get(User, row.user_id)
-    if user is None:
+    if (
+        user is None
+        or row is None
+        or row.user_id != user.id
+        or row.used_at is not None
+        or row.expires_at <= now
+    ):
         abort(400, description=INVALID_TOKEN)
 
     user.set_password(password)
