@@ -692,6 +692,45 @@ DNS change; the Vercel connect half waits for the second project.
   104 of 104 pass. No Vercel, Render, Stripe or DNS settings changed.
   Cutover not started.
 
+## 2026-10-28 — Beta fixes before cutover: loading state, category, password reset (Claude Code)
+
+Joshua found three things while testing beta; one PR into `staging`.
+
+1. **"Every shop is restocking" / 0 shops on first load.** Cause: the home
+   page and /shops are cached pages. When the staging API is asleep while
+   Vercel builds them, `getShops()` turned the failed read into `[]`, so the
+   cached copy said there were no shops until it was rebuilt in the
+   background. Now `getShops()` returns `null` for "not known", and those
+   pages show "Loading shops..." with skeleton cards and fetch the list in the
+   browser (`web/components/shop/use-shops.ts`, about 75 s of retries for a
+   Render cold start, then "Try again"). "Restocking", "0 shops" and
+   "No shops" appear only after a list has actually arrived. New cold-start
+   browser suite (`npm run test:e2e:cold`, also in Web CI) builds the site
+   with the API unreachable: 10 of 10 fail on the old code, 10 of 10 pass.
+2. **Chocolate Bar under Drinks.** Code bug, not data: `category_for_name`
+   matched substrings, and "choCOLAte" contains the drink word "cola" (it
+   would also have put "HomemADE Fudge" under drinks). It now matches whole
+   words, with candy words winning ("Cola Gummies" stays candy). Category is
+   computed from the name on every read and never stored, so the fix applies
+   to staging and production rows with no data migration. Checked read-only
+   on the staging Neon branch (a copy of production): 4 catalog items, only
+   Chocolate Bar changes (drinks to candy).
+3. **Forgot password.** Link on /login, `/forgot-password`, and
+   `/reset-password#token=...`. API: `backend/password_reset.py`, new table
+   `password_reset_token` (created by `db.create_all()`; SHA-256 of the token
+   only, 60-minute expiry, single use, newest link only, 3 links an hour per
+   account). Same 202 answer whether or not the email has an account. Off by
+   default; to send reset emails set on the API: `PASSWORD_RESET_EMAILS=true`,
+   `RESEND_API_KEY`, `MESSAGE_EMAIL_FROM` (domain verified in Resend), and
+   `PUBLIC_SITE_URL` must be the Next.js site. Without them nothing is created
+   or sent and the page points people to hello@.
+- Tests: API 371 passed, 9 skipped (SQLite); the new reset, category,
+  access-control and account-deletion tests also pass on Postgres 16. Web
+  typecheck, lint and build pass; Playwright 134 of 134 and cold-start 10 of
+  10 pass.
+- No Vercel, Render, DNS or production changes. No data changed. Cutover not
+  started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

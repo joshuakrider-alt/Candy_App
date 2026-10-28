@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { ShopCard, isOpenNow } from "@/components/shop/shop-card";
+import { ShopsLoading, ShopsUnavailable } from "@/components/shop/shops-loading";
+import { useShops } from "@/components/shop/use-shops";
 import type { ShopSummary } from "@/lib/flask";
 import { cn } from "@/lib/utils";
 
@@ -11,8 +13,14 @@ import { cn } from "@/lib/utils";
  * rendered from the server; filtering happens in the browser so the page can
  * stay cached. Search covers shop names, neighbourhoods and taglines (Flask
  * has no endpoint that searches every shop's items at once yet).
+ *
+ * `shops` is null when the server could not reach the API while building the
+ * cached page; the list is then fetched here, and the count and "No shops
+ * match" only appear once it has arrived.
  */
-export function ShopBrowser({ shops }: { shops: ShopSummary[] }) {
+export function ShopBrowser({ shops: initial }: { shops: ShopSummary[] | null }) {
+  const state = useShops(initial);
+  const shops = state.status === "ready" ? state.shops : NO_SHOPS;
   const [query, setQuery] = useState("");
   const [area, setArea] = useState<string | null>(null);
   const [cardOnly, setCardOnly] = useState(false);
@@ -83,6 +91,22 @@ export function ShopBrowser({ shops }: { shops: ShopSummary[] }) {
 
       {/* Keeps the heading order h1 > h2 > h3 for the shop cards' h3s. */}
       <h2 className="sr-only">Shops</h2>
+      {state.status === "loading" ? (
+        <ShopsLoading slow={state.slow} count={6} />
+      ) : state.status === "error" ? (
+        <ShopsUnavailable {...state} />
+      ) : (
+        <ShopResults visible={visible} anyShops={shops.length > 0} />
+      )}
+    </div>
+  );
+}
+
+const NO_SHOPS: ShopSummary[] = [];
+
+function ShopResults({ visible, anyShops }: { visible: ShopSummary[]; anyShops: boolean }) {
+  return (
+    <>
       <p aria-live="polite" className="text-sm font-bold text-muted-foreground">
         {visible.length} shop{visible.length === 1 ? "" : "s"}
       </p>
@@ -96,10 +120,10 @@ export function ShopBrowser({ shops }: { shops: ShopSummary[] }) {
         </ul>
       ) : (
         <p className="rounded-lg bg-paper/90 p-8 text-center text-muted-foreground shadow-candy">
-          No shops match. Try another word or clear a filter.
+          {anyShops ? "No shops match. Try another word or clear a filter." : "No shops are open yet. Check back soon."}
         </p>
       )}
-    </div>
+    </>
   );
 }
 

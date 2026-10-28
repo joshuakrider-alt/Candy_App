@@ -13,6 +13,9 @@ PUBLIC_ROUTES = {
     ("GET", "/config"),
     ("POST", "/signup"),
     ("POST", "/login"),
+    # Forgot password: the emailed token is the authorization.
+    ("POST", "/password-reset/request"),
+    ("POST", "/password-reset/confirm"),
     ("GET", "/candies"),
     ("GET", "/candies/<int:candy_id>"),
     ("POST", "/applications"),

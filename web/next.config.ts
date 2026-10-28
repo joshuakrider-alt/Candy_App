@@ -7,6 +7,9 @@ const imageHost = process.env.NEXT_PUBLIC_IMAGE_HOST;
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Only the cold-start browser tests change this (playwright.cold.config.ts),
+  // so their second build does not overwrite the main one.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Stripe sends buyers back to the old site's addresses. These keep the
   // query string (order, session_id, payment). The /s/<slug> one lives here
   // rather than in the shop page, because reading the query in the page would

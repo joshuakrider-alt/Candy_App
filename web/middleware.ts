@@ -18,7 +18,7 @@ const SIGNED_IN = ["/account", "/seller", "/admin"];
  * signed-in layouts read the session, and the sign-in pages opt in with
  * `dynamic = "force-dynamic"`.
  */
-const NONCE_PATHS = [...SIGNED_IN, "/login", "/signup", "/checkout", "/sell"];
+const NONCE_PATHS = [...SIGNED_IN, "/login", "/signup", "/forgot-password", "/reset-password", "/checkout", "/sell"];
 
 const isUnder = (pathname: string, roots: string[]) =>
   roots.some((root) => pathname === root || pathname.startsWith(`${root}/`));

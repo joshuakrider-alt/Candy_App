@@ -76,6 +76,12 @@ jobs:
       - name: Browser tests
         run: npm run test:e2e
 
+      # A second build with the API unreachable, as beta is built when Render
+      # is asleep: the home page and /shops must say "Loading shops...", never
+      # "no shops", until the list arrives.
+      - name: Cold-start browser tests
+        run: npm run test:e2e:cold
+
       - name: Keep the test report
         if: failure()
         uses: actions/upload-artifact@v4
