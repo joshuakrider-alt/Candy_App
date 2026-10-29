@@ -9,7 +9,7 @@ const PAGES = ["", "/shops", "/sell/apply", "/about", "/faq", "/contact", "/pick
 
 /** Every public page plus every approved shop: the old sitemap had no shop pages at all. */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const shops = await getShops().catch(() => []);
+  const shops = (await getShops().catch(() => null)) ?? [];
   return [
     ...PAGES.map((path) => ({ url: `${SITE_URL}${path || "/"}` })),
     ...shops.map((shop) => ({ url: `${SITE_URL}/s/${shop.slug}`, changeFrequency: "daily" as const })),

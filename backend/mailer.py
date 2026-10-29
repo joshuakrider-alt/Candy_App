@@ -5,8 +5,10 @@ small: one plain-text message to one address through Resend's HTTP API, using
 only the standard library. HTTP rather than SMTP because it needs no extra
 dependency and no outbound mail port on the host.
 
-Nothing is sent unless MESSAGE_EMAIL_NOTIFICATIONS is on *and* RESEND_API_KEY
-and MESSAGE_EMAIL_FROM are set. The sender address has to be on a domain that
+Nothing is sent without RESEND_API_KEY and MESSAGE_EMAIL_FROM. On top of
+that, each kind of email has its own switch: MESSAGE_EMAIL_NOTIFICATIONS for
+message notices (is_configured) and PASSWORD_RESET_EMAILS for reset links
+(password_reset.py). The sender address has to be on a domain that
 is verified in Resend, which means DNS records only the domain owner can add.
 """
 
@@ -21,12 +23,14 @@ RESEND_ENDPOINT = "https://api.resend.com/emails"
 SEND_TIMEOUT_SECONDS = 10
 
 
+def can_send(config):
+    """A Resend key and a sender address are both set."""
+    return bool(config.get("RESEND_API_KEY") and config.get("MESSAGE_EMAIL_FROM"))
+
+
 def is_configured(config):
-    return bool(
-        config.get("MESSAGE_EMAIL_NOTIFICATIONS")
-        and config.get("RESEND_API_KEY")
-        and config.get("MESSAGE_EMAIL_FROM")
-    )
+    """Message notices are switched on and can be sent."""
+    return bool(config.get("MESSAGE_EMAIL_NOTIFICATIONS") and can_send(config))
 
 
 def send_email(config, to, subject, text):
@@ -36,7 +40,7 @@ def send_email(config, to, subject, text):
     message itself is already saved), so every error is logged and swallowed.
     The address is not logged.
     """
-    if not is_configured(config):
+    if not can_send(config):
         return False
     payload = json.dumps(
         {

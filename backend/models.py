@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import datetime, timezone
 
@@ -56,11 +57,36 @@ PICKUP_ADDRESS_MAX_LENGTH = 300
 PICKUP_NOTE_MAX_LENGTH = 200
 
 
+# The category is worked out from the item's name every time it is read; it is
+# never stored. Names are matched as whole words, not substrings: substring
+# matching put "Chocolate Bar" under drinks ("choCOLAte") and would have done
+# the same to "Homemade Fudge" ("homemADE").
+CANDY_WORDS = frozenset({
+    "candy", "candies", "gummy", "gummies", "gummi", "gum", "lollipop",
+    "lollipops", "chocolate", "chocolates", "taffy", "licorice", "fudge",
+})
+CHIPS_WORDS = frozenset({
+    "chip", "chips", "puff", "puffs", "nacho", "nachos", "cheeto", "cheetos",
+    "pretzel", "pretzels", "popcorn", "crisps",
+})
+DRINKS_WORDS = frozenset({
+    "soda", "sodas", "punch", "juice", "juices", "drink", "drinks",
+    "cola", "colas", "lemonade", "limeade", "orangeade", "tea", "water",
+    "slushie", "slushy",
+})
+_WORD = re.compile(r"[a-z]+")
+
+
 def category_for_name(name):
-    text = (name or "").lower()
-    if any(word in text for word in ("chip", "puff", "nacho", "cheeto", "pretzel")):
+    words = set(_WORD.findall((name or "").lower()))
+    # Candy words win, so "Cola Gummies" or "Fruit Punch Gummies" stay candy
+    # even though they mention a drink. "Pop" and "milk" are left out of the
+    # drink words on purpose: Ring Pops and Milk Duds are candy.
+    if words & CANDY_WORDS:
+        return "candy"
+    if words & CHIPS_WORDS:
         return "chips"
-    if any(word in text for word in ("soda", "punch", "juice", "drink", "cola", "ade")):
+    if words & DRINKS_WORDS:
         return "drinks"
     return "candy"
 
@@ -754,3 +780,26 @@ class MessageReport(db.Model):
     resolved_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
 
     message = db.relationship("Message")
+
+
+class PasswordResetToken(db.Model):
+    """One "forgot password" link (see password_reset.py).
+
+    Only a SHA-256 of the token is kept, so a copy of the database cannot be
+    turned into working reset links. A token works once (used_at) and only
+    until expires_at.
+    """
+
+    __tablename__ = "password_reset_token"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token_hash = db.Column(db.String(64), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime)

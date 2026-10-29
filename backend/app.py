@@ -13,6 +13,7 @@ import accounts
 import connect
 import identity
 import messaging
+import password_reset
 import payments
 import storage
 import storefront
@@ -226,6 +227,8 @@ def create_app(config_overrides=None):
 
     # In-site messaging limits and the optional email notice (messaging.py).
     messaging.configure(app, _env_int, _env_bool, os.environ)
+    # "Forgot password?" links, off until reset emails are switched on.
+    password_reset.configure(app, _env_int, _env_bool)
 
     app.config["RUN_MIGRATIONS_ON_BOOT"] = True
 
@@ -279,6 +282,7 @@ def create_app(config_overrides=None):
     register_error_handlers(app, jwt)
     register_routes(app)
     app.register_blueprint(messaging.bp)
+    app.register_blueprint(password_reset.bp)
     return app
 
 
@@ -725,6 +729,7 @@ def register_routes(app):
         config["max_upload_bytes"] = storage.max_upload_bytes(app.config)
         config["accepted_image_types"] = sorted(storage.ALLOWED_CONTENT_TYPES)
         config["identity_enabled"] = identity.identity_enabled()
+        config["password_reset_enabled"] = password_reset.is_enabled(app.config)
         return jsonify(config)
 
     # ------------------------------------------------------------------

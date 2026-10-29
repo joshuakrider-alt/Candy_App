@@ -44,6 +44,9 @@ The API listens on `http://127.0.0.1:5000`. A frontend served from
 | `MESSAGE_RATE_PER_HOUR` | no | `60` | Messages one login may send per hour (admins exempt) |
 | `CONVERSATION_RATE_PER_DAY` | no | `10` | New conversations one login may start per day (admins exempt) |
 | `MESSAGE_EMAIL_NOTIFICATIONS` | no | off | `true` turns on "you have a new message" emails. Nothing is sent unless the two below are set too |
+| `PASSWORD_RESET_EMAILS` | no | off | `true` turns on "Forgot password?" emails. Nothing is sent unless the two below are set too. Separate from message notices, so either can be on alone |
+| `PASSWORD_RESET_TOKEN_MINUTES` | no | `60` | How long a reset link works |
+| `PASSWORD_RESET_MAX_PER_HOUR` | no | `3` | Reset links one account can be sent per hour |
 | `RESEND_API_KEY` | for email | empty | Resend API key (`re_...`). Never commit it |
 | `MESSAGE_EMAIL_FROM` | for email | empty | e.g. `The Candy Lady <hello@neighborhoodcandylady.com>`; the domain must be verified in Resend |
 | `SUPPORT_NOTIFY_EMAIL` | no | empty | Where support notices go (e.g. `hello@neighborhoodcandylady.com`) instead of every admin's own address |
@@ -367,6 +370,29 @@ The tables (`conversation`, `conversation_party`, `message`,
 `conversation_read`, `message_block`, `message_report`) are new, so
 `db.create_all()` creates them on the first boot of a deploy; nothing existing
 is altered.
+
+## Forgot password
+
+`POST /password-reset/request {"email"}` always answers `202` with the same
+body whether or not the address has an account. When it does, and reset
+emails are on, the account gets a link to
+`PUBLIC_SITE_URL/reset-password#token=...` (the Next.js page; the old static
+site has no such page, so keep `PASSWORD_RESET_EMAILS` off on an API whose
+`PUBLIC_SITE_URL` is still the old site). The token sits in the URL fragment,
+so it never reaches a server log. `POST /password-reset/confirm {"token",
+"password"}` sets the password if the token is known, unused and unexpired,
+and spends it and every other open link for that account. Only a SHA-256 of
+each token is stored (table `password_reset_token`, created by
+`db.create_all()`). Asking again retires the previous link.
+
+Off by default and fails safe: with any of `PASSWORD_RESET_EMAILS`,
+`RESEND_API_KEY` or `MESSAGE_EMAIL_FROM` missing, no token is created, nothing
+is sent, the API logs a warning, and the answer is still `202` with
+`"email_enabled": false` (the same for every address) so the page can point
+people to hello@ instead. `GET /config` reports `password_reset_enabled`.
+
+Existing sessions are not signed out by a reset: access tokens are stateless
+JWTs that live `JWT_ACCESS_TOKEN_HOURS` (12).
 
 ## Schema migrations
 

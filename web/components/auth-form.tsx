@@ -76,6 +76,11 @@ export function AuthForm({ mode, next }: { mode: Mode; next?: string }) {
             minLength={mode === "signup" ? 8 : undefined}
             required
           />
+          {mode === "login" && (
+            <Link href="/forgot-password" className="-mt-2 self-end text-sm font-bold text-cherry-deep underline">
+              Forgot password?
+            </Link>
+          )}
           {error && (
             <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-bold text-destructive">
               {error}

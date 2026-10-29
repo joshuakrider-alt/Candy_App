@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Candy, CupSoda, Popcorn, Search } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
-import { ShopCard, isOpenNow } from "@/components/shop/shop-card";
+import { OpenNow } from "@/components/shop/open-now";
 import { getShops } from "@/lib/flask";
 
 // Cached and refreshed every 60 s.
@@ -20,8 +20,9 @@ const STEPS = [
 ];
 
 export default async function HomePage() {
+  // null when the API could not be reached while this copy was built; the
+  // "Open now" row then loads the list in the browser (see useShops).
   const shops = await getShops();
-  const open = shops.filter(isOpenNow).slice(0, 6);
 
   return (
     <div className="flex flex-col gap-12">
@@ -72,19 +73,7 @@ export default async function HomePage() {
             All shops
           </Link>
         </div>
-        {open.length ? (
-          <ul className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-2">
-            {open.map((shop) => (
-              <li key={shop.id} className="w-72 shrink-0 snap-start">
-                <ShopCard shop={shop} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="rounded-lg bg-paper/90 p-6 text-muted-foreground shadow-candy">
-            Every shop is restocking right now. Check back soon.
-          </p>
-        )}
+        <OpenNow shops={shops} />
       </section>
 
       <section aria-labelledby="what" className="flex flex-col gap-4">

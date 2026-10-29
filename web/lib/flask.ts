@@ -50,8 +50,14 @@ async function read<T>(path: string, revalidate: number): Promise<T | null> {
   }
 }
 
-export async function getShops(): Promise<ShopSummary[]> {
-  return (await read<ShopSummary[]>("/shops", SHOPS_REVALIDATE)) ?? [];
+/**
+ * The approved shops, or `null` when they are not known: the API could not be
+ * reached while the page was being built. Never turn that into `[]`, or the
+ * cached page tells every visitor there are no shops until it is rebuilt
+ * (the pages show "Loading shops..." and fetch the list instead).
+ */
+export async function getShops(): Promise<ShopSummary[] | null> {
+  return read<ShopSummary[]>("/shops", SHOPS_REVALIDATE);
 }
 
 export async function getShop(slug: string): Promise<Storefront | null> {
