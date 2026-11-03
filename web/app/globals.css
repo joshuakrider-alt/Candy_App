@@ -4,12 +4,35 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Brand tokens, carried over from the old site's styles.css :root so the new
+ * site looks like itself. Each one becomes a Tailwind utility: bg-cherry,
+ * text-cola, rounded-xl (32px), shadow-candy and so on.
+ */
+@theme {
+  --color-cherry: #ff4d6d;
+  --color-bubblegum: #ff85b3;
+  --color-lemon: #ffd84d;
+  --color-orange-pop: #ff8a3d;
+  --color-soda-aqua: #54d6d6;
+  --color-cola: #44251d;
+  --color-cream: #fff8ef;
+  --color-paper: #fffef9;
+  --color-ink: #2f1b17;
+
+  /* Darker shades for text and filled buttons. White on --cherry is 3.2:1,
+     below the 4.5:1 that small text needs; these pass on cream and paper. */
+  --color-cherry-deep: #d6304f;
+  --color-ember: #b5410f;
+
+  --shadow-candy: 0 18px 50px rgba(86, 31, 34, 0.16);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans);
+  --font-sans: var(--font-nunito);
+  --font-heading: var(--font-baloo);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,92 +62,123 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* The old site's three radii (styles.css --radius-md/lg/xl) are kept at
+     their exact sizes; the smaller and larger steps scale from them. */
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-2xl: 40px;
+  --radius-3xl: 48px;
+  --radius-4xl: 56px;
 }
 
+/* shadcn's colour slots, filled with the brand palette. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: light;
+  --background: #fffdf8;
+  --foreground: #2f1b17;
+  --card: #fffef9;
+  --card-foreground: #2f1b17;
+  --popover: #fffef9;
+  --popover-foreground: #2f1b17;
+  --primary: #d6304f;
+  --primary-foreground: #ffffff;
+  --secondary: #fff8ef;
+  --secondary-foreground: #44251d;
+  --muted: #fff3e3;
+  --muted-foreground: #6b4a42;
+  --accent: #ffe6ef;
+  --accent-foreground: #44251d;
+  --destructive: #c62828;
+  --border: rgba(68, 37, 29, 0.14);
+  --input: rgba(68, 37, 29, 0.22);
+  --ring: #ff4d6d;
+  --chart-1: #ff4d6d;
+  --chart-2: #54d6d6;
+  --chart-3: #ffd84d;
+  --chart-4: #ff8a3d;
+  --chart-5: #44251d;
+  --radius: 24px;
+  --sidebar: #fff8ef;
+  --sidebar-foreground: #2f1b17;
+  --sidebar-primary: #d6304f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffe6ef;
+  --sidebar-accent-foreground: #44251d;
+  --sidebar-border: rgba(68, 37, 29, 0.14);
+  --sidebar-ring: #ff4d6d;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+  }
+  body {
+    @apply text-foreground;
+    min-height: 100vh;
+    /* Same candy wash as the old site's body background. */
+    background:
+      radial-gradient(circle at top left, rgba(255, 216, 77, 0.8), transparent 28%),
+      radial-gradient(circle at top right, rgba(84, 214, 214, 0.45), transparent 24%),
+      linear-gradient(180deg, #fff3d8 0%, #ffe6ef 48%, #fffdf8 100%);
+    background-attachment: fixed;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-heading;
+  }
+}
+
+/*
+ * Text pages (about, FAQ, terms and so on) are plain HTML ported from the old
+ * site, so they are styled here by element instead of a class on every tag.
+ */
+@layer components {
+  .info-page {
+    @apply mx-auto flex w-full max-w-3xl flex-col gap-5;
+  }
+  .info-page .info-hero {
+    @apply rounded-xl bg-paper/90 p-6 shadow-candy sm:p-8;
+  }
+  .info-page .eyebrow {
+    @apply mb-2 text-xs font-extrabold tracking-[0.12em] text-ember uppercase;
+  }
+  .info-page h1 {
+    @apply text-4xl leading-tight font-extrabold text-cola sm:text-5xl;
+  }
+  .info-page .hero-text {
+    @apply mt-3 text-lg text-muted-foreground;
+  }
+  .info-page .panel {
+    @apply rounded-lg bg-paper/90 p-6 shadow-candy;
+  }
+  .info-page .panel h2 {
+    @apply mb-2 text-2xl font-bold text-cola;
+  }
+  .info-page .panel p + p {
+    @apply mt-3;
+  }
+  .info-page .panel ul {
+    @apply list-disc space-y-1 pl-5;
+  }
+  .info-page a:not(.button-link) {
+    @apply font-bold text-cherry-deep underline underline-offset-2;
+  }
+  .info-page details {
+    @apply border-b border-border py-3 last:border-b-0;
+  }
+  .info-page summary {
+    @apply cursor-pointer font-bold text-cola;
+  }
+  .info-page details p {
+    @apply mt-2;
+  }
+  .info-page blockquote {
+    @apply rounded-lg bg-lemon/70 p-6 font-heading text-2xl font-bold text-cola;
   }
 }

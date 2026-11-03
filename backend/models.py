@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import datetime, timezone
 
@@ -50,12 +51,42 @@ FULFILLABLE_PAYMENT_STATUSES = ("paid", "pay_at_pickup")
 
 PICKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+# A shop's street address and door note. Private: they go only to the owner,
+# an admin, and buyers holding a paid order (see Order.pickup_dict).
+PICKUP_ADDRESS_MAX_LENGTH = 300
+PICKUP_NOTE_MAX_LENGTH = 200
+
+
+# The category is worked out from the item's name every time it is read; it is
+# never stored. Names are matched as whole words, not substrings: substring
+# matching put "Chocolate Bar" under drinks ("choCOLAte") and would have done
+# the same to "Homemade Fudge" ("homemADE").
+CANDY_WORDS = frozenset({
+    "candy", "candies", "gummy", "gummies", "gummi", "gum", "lollipop",
+    "lollipops", "chocolate", "chocolates", "taffy", "licorice", "fudge",
+})
+CHIPS_WORDS = frozenset({
+    "chip", "chips", "puff", "puffs", "nacho", "nachos", "cheeto", "cheetos",
+    "pretzel", "pretzels", "popcorn", "crisps",
+})
+DRINKS_WORDS = frozenset({
+    "soda", "sodas", "punch", "juice", "juices", "drink", "drinks",
+    "cola", "colas", "lemonade", "limeade", "orangeade", "tea", "water",
+    "slushie", "slushy",
+})
+_WORD = re.compile(r"[a-z]+")
+
 
 def category_for_name(name):
-    text = (name or "").lower()
-    if any(word in text for word in ("chip", "puff", "nacho", "cheeto", "pretzel")):
+    words = set(_WORD.findall((name or "").lower()))
+    # Candy words win, so "Cola Gummies" or "Fruit Punch Gummies" stay candy
+    # even though they mention a drink. "Pop" and "milk" are left out of the
+    # drink words on purpose: Ring Pops and Milk Duds are candy.
+    if words & CANDY_WORDS:
+        return "candy"
+    if words & CHIPS_WORDS:
         return "chips"
-    if any(word in text for word in ("soda", "punch", "juice", "drink", "cola", "ade")):
+    if words & DRINKS_WORDS:
         return "drinks"
     return "candy"
 
@@ -175,11 +206,25 @@ class Seller(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     shop_name = db.Column(db.String(200), nullable=False)
+    # How the shop is labeled ("Candy Lady", "Candy Shop", or the seller's own
+    # wording; rules in storefront.py). New shops default to "Candy Shop". The
+    # database default stays "Candy Lady" so rows written by older code (and
+    # every shop that predates the column) keep the original wording.
+    shop_title = db.Column(
+        db.String(40),
+        nullable=False,
+        default="Candy Shop",
+        server_default="Candy Lady",
+    )
     contact_name = db.Column(db.String(120), nullable=False)
     contact_email = db.Column(db.String(200))
     neighborhood = db.Column(db.String(120), nullable=False)
     pickup_window = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), nullable=False, default="pending")
+    # Where to actually collect an order. The public pages only ever show the
+    # neighborhood; these two are released per order, once it is paid.
+    pickup_address = db.Column(db.String(PICKUP_ADDRESS_MAX_LENGTH))
+    pickup_note = db.Column(db.String(PICKUP_NOTE_MAX_LENGTH))
 
     # The shopfront face: one photo of the person buyers will meet at pickup.
     # Distinct from the selfie Stripe Identity takes, which stays at Stripe.
@@ -290,6 +335,7 @@ class Seller(db.Model):
         data = {
             "id": self.id,
             "shop_name": self.shop_name,
+            "shop_title": self.shop_title,
             "contact_name": self.contact_name,
             "neighborhood": self.neighborhood,
             "pickup_window": self.pickup_window,
@@ -315,6 +361,8 @@ class Seller(db.Model):
             data["contact_email"] = self.contact_email
             data["profile_photo_status"] = self.profile_photo_status
             data["identity_status"] = self.identity_status
+            data["pickup_address"] = self.pickup_address
+            data["pickup_note"] = self.pickup_note
             # Owner/admin only: buyers do not need to see payout plumbing.
             data["connect"] = self.connect_dict()
         return data
@@ -483,6 +531,10 @@ class Order(db.Model):
     # with "Refund application fee" returns the fee in proportion, so the
     # platform's take and the seller's share both move.
     platform_fee_refunded_cents = db.Column(db.Integer, nullable=False, default=0)
+    # Units this order is owed that were not on the shelf when its payment
+    # landed. Only a payment that arrives after the sweep released the stock
+    # can leave this above 0: by then the units may have gone to someone else.
+    stock_shortfall = db.Column(db.Integer, nullable=False, default=0)
 
     user = db.relationship("User", back_populates="orders")
     seller = db.relationship("Seller", back_populates="orders")
@@ -524,6 +576,7 @@ class Order(db.Model):
             "total_cents": self.total_cents,
             "refunded_cents": self.refunded_cents or 0,
             "platform_fee_refunded_cents": self.platform_fee_refunded_cents or 0,
+            "stock_shortfall": self.stock_shortfall or 0,
             "payment_status": self.payment_status,
             "platform_fee_cents": self.platform_fee_cents,
             "seller_payout_cents": self.seller_payout_cents,
@@ -540,6 +593,18 @@ class Order(db.Model):
         else:
             data["pickup_code"] = None
         return data
+
+    def pickup_dict(self):
+        """The shop's private address and note, for whoever may see this order.
+
+        Same gate as the pickup code: nothing until the order is paid (or is a
+        legacy pay-at-pickup order), so an abandoned or refunded checkout never
+        reveals where a seller lives. None when there is nothing to show yet.
+        """
+        seller = self.seller
+        if not self.is_fulfillable or seller is None or not seller.pickup_address:
+            return None
+        return {"address": seller.pickup_address, "note": seller.pickup_note}
 
 
 class OrderItem(db.Model):
@@ -563,3 +628,178 @@ class OrderItem(db.Model):
             "line_total_cents": (self.quantity or 0) * (self.unit_price_cents or 0),
             "candy": self.candy.to_dict() if self.candy else None,
         }
+
+
+# ----------------------------------------------------------------------
+# In-site messaging
+# ----------------------------------------------------------------------
+# A conversation is between "parties", not logins. A party is one of:
+#   ("user", user_id)    a buyer
+#   ("seller", seller_id) a shop: every login bound to that shop shares it
+#   ("support", None)    the platform; every admin answers as support
+# so a shop with two logins has one inbox, and any admin can pick up a
+# support thread. messaging.py owns who may talk to whom.
+
+CONVERSATION_KINDS = ("support", "seller", "order")
+PARTY_TYPES = ("user", "seller", "support")
+MESSAGE_REPORT_STATUSES = ("open", "resolved")
+
+
+class Conversation(db.Model):
+    __tablename__ = "conversation"
+    __table_args__ = (
+        db.CheckConstraint(
+            "kind IN ('support', 'seller', 'order')",
+            name="ck_conversation_kind",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), nullable=False)
+    subject = db.Column(db.String(120), nullable=False)
+    # Set for kind="order": the one thread about that order. Unique, so a
+    # buyer and a shop cannot end up with two threads about the same bag.
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), unique=True)
+    # Who opened it, for the daily new-conversation limit. NULL once that
+    # account is deleted.
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    last_message_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+
+    parties = db.relationship(
+        "ConversationParty",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
+    messages = db.relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.id",
+        lazy=True,
+    )
+
+
+class ConversationParty(db.Model):
+    __tablename__ = "conversation_party"
+    __table_args__ = (
+        db.CheckConstraint(
+            "party_type IN ('user', 'seller', 'support')",
+            name="ck_conversation_party_type",
+        ),
+        db.Index("ix_conversation_party_lookup", "party_type", "party_id"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(
+        db.Integer, db.ForeignKey("conversation.id"), nullable=False, index=True
+    )
+    party_type = db.Column(db.String(20), nullable=False)
+    # NULL for "support", and for a buyer whose account has been deleted.
+    party_id = db.Column(db.Integer)
+
+    conversation = db.relationship("Conversation", back_populates="parties")
+
+
+class Message(db.Model):
+    __tablename__ = "message"
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(
+        db.Integer, db.ForeignKey("conversation.id"), nullable=False, index=True
+    )
+    # The login that typed it, for rate limits and reports. NULL once that
+    # account is deleted; the party below still says which side sent it.
+    sender_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), index=True)
+    sender_party_type = db.Column(db.String(20), nullable=False)
+    sender_party_id = db.Column(db.Integer)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+
+    conversation = db.relationship("Conversation", back_populates="messages")
+    sender = db.relationship("User")
+
+
+class ConversationRead(db.Model):
+    """How far one login has read one conversation."""
+
+    __tablename__ = "conversation_read"
+    __table_args__ = (
+        db.UniqueConstraint("conversation_id", "user_id", name="uq_conversation_read"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey("conversation.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+
+
+class MessageBlock(db.Model):
+    """One party refusing messages from another. Support is never blockable."""
+
+    __tablename__ = "message_block"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "blocker_type",
+            "blocker_id",
+            "blocked_type",
+            "blocked_id",
+            name="uq_message_block",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    blocker_type = db.Column(db.String(20), nullable=False)
+    blocker_id = db.Column(db.Integer, nullable=False)
+    blocked_type = db.Column(db.String(20), nullable=False)
+    blocked_id = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
+class MessageReport(db.Model):
+    """A message someone flagged for an admin to look at."""
+
+    __tablename__ = "message_report"
+    __table_args__ = (
+        db.UniqueConstraint("message_id", "reporter_user_id", name="uq_message_report"),
+        db.CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_message_report_status",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False, index=True)
+    # NULL once the reporter deletes their account; the report itself stays.
+    reporter_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reason = db.Column(db.String(500))
+    status = db.Column(db.String(20), nullable=False, default="open")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    resolved_at = db.Column(db.DateTime)
+    resolved_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    message = db.relationship("Message")
+
+
+class PasswordResetToken(db.Model):
+    """One "forgot password" link (see password_reset.py).
+
+    Only a SHA-256 of the token is kept, so a copy of the database cannot be
+    turned into working reset links. A token works once (used_at) and only
+    until expires_at.
+    """
+
+    __tablename__ = "password_reset_token"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token_hash = db.Column(db.String(64), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime)

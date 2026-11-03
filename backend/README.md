@@ -39,6 +39,17 @@ The API listens on `http://127.0.0.1:5000`. A frontend served from
 | `ADMIN_BOOTSTRAP_EMAIL` | no | unset | See "First admin" below |
 | `ADMIN_BOOTSTRAP_PASSWORD` | no | unset | See "First admin" below |
 | `ADMIN_BOOTSTRAP_NAME` | no | `Platform Admin` | Only used when creating the account |
+| `MESSAGE_MAX_LENGTH` | no | `2000` | Longest message, in characters |
+| `MESSAGE_RATE_PER_MINUTE` | no | `6` | Messages one login may send per minute (admins exempt) |
+| `MESSAGE_RATE_PER_HOUR` | no | `60` | Messages one login may send per hour (admins exempt) |
+| `CONVERSATION_RATE_PER_DAY` | no | `10` | New conversations one login may start per day (admins exempt) |
+| `MESSAGE_EMAIL_NOTIFICATIONS` | no | off | `true` turns on "you have a new message" emails. Nothing is sent unless the two below are set too |
+| `PASSWORD_RESET_EMAILS` | no | off | `true` turns on "Forgot password?" emails. Nothing is sent unless the two below are set too. Separate from message notices, so either can be on alone |
+| `PASSWORD_RESET_TOKEN_MINUTES` | no | `60` | How long a reset link works |
+| `PASSWORD_RESET_MAX_PER_HOUR` | no | `3` | Reset links one account can be sent per hour |
+| `RESEND_API_KEY` | for email | empty | Resend API key (`re_...`). Never commit it |
+| `MESSAGE_EMAIL_FROM` | for email | empty | e.g. `The Candy Lady <hello@neighborhoodcandylady.com>`; the domain must be verified in Resend |
+| `SUPPORT_NOTIFY_EMAIL` | no | empty | Where support notices go (e.g. `hello@neighborhoodcandylady.com`) instead of every admin's own address |
 
 `PROTOTYPE_LOGIN_PASSWORD` is gone. If it is still set, the API logs a warning
 and ignores it; remove it from Render.
@@ -83,6 +94,7 @@ What happens:
 | Checkouts still holding stock (`unpaid`/`pending`) | Marked `expired` and their reserved units returned to the shelf |
 | The seller queue | Anonymized orders stay in it, with `buyer_name` reading "Deleted account" |
 | That person's shop, if they were a seller | Not deleted. Contact details that were theirs are cleared, and if they were the shop's last login it goes back to `pending`, which hides it from buyers without touching its inventory or other buyers' orders |
+| Messages they sent | Kept for the other side, shown as from "Deleted account"; the link to the account is removed. Their read markers and blocks are deleted, and that conversation can no longer be replied to |
 | Everyone else's data | Untouched |
 
 Admins cannot delete themselves through this endpoint: it returns 403. That is
@@ -202,14 +214,20 @@ answers 503 saying so.
 
 Seller flow (buttons on `seller.html`):
 
-1. **Connect Stripe** → `POST /sellers/<id>/stripe/connect` creates the Express
-   account the first time (reuses it after) and returns a one-time Account Link.
+1. **Connect Stripe** → `POST /sellers/<id>/stripe/connect` creates the
+   account the first time through Accounts v2 (`POST /v2/core/accounts`,
+   Express dashboard, merchant `card_payments` plus recipient
+   `stripe_transfers`, platform pays fees and covers losses) and reuses it
+   after. It returns a one-time v2 Account Link.
    The seller enters bank, identity and tax details on Stripe's page; none of
    it reaches this API.
 2. Stripe returns to `seller.html?stripe=return` (or `?stripe=refresh` if the
    link expired, which re-opens onboarding). The page calls
-   `GET /sellers/<id>/stripe/status`, which retrieves the account and mirrors
-   `charges_enabled` / `details_submitted` onto the shop.
+   `GET /sellers/<id>/stripe/status`, which retrieves the account (v2) and
+   mirrors `charges_enabled` / `details_submitted` onto the shop. v2 has no
+   such flags, so `connect.readiness` works them out: charges once card
+   payments and transfers are both active, details once nothing is
+   currently due or past due.
 3. `account.updated` webhooks keep those flags current afterwards (e.g. Stripe
    asks for more info and switches charges off).
 
@@ -285,13 +303,96 @@ Seller fields (all optional or defaulted, added by boot migrations):
   CSS on a public page). The API also returns `on_primary`/`on_accent`, a
   black-or-white text colour picked for contrast.
 - `logo_url` — `https://` only. No upload pipeline yet.
+- `shop_title` — how the shop is labeled on its page, `/shops`, orders and
+  messages: `Candy Lady`, `Candy Woman`, `Candy Guy`, `Candy Man`,
+  `Candy Shop`, or the seller's own 2–24 characters (letters, numbers,
+  spaces, `' & . -`; a basic word filter, see `storefront.normalize_shop_title`).
+  It is only a title; nothing asks for a seller's gender. `POST /applications`
+  takes it optionally (default `Candy Shop`); `PUT /sellers/<id>/storefront`
+  changes it and refuses a blank. The column's database default is
+  `Candy Lady`, so shops from before the column keep that label and the
+  previous release can still insert shops after a rollback.
 
 `PUT /sellers/<id>/storefront` (owner or admin) edits them; send `null`/`""`
 to clear an optional one.
 
+### Private pickup address
+
+`pickup_address` (up to 300 characters, line breaks kept) and `pickup_note`
+(up to 200, e.g. "ring the side door") are where a buyer actually collects an
+order. They are never part of the public shop: `/sellers`, `/shops`,
+`/shops/<slug>` and `/sellers/<id>/storefront` show only the neighborhood.
+They come back to the shop's owner and admins (`GET /me`, `GET /applications`),
+and to a buyer as `order.pickup = {"address", "note"}` on `GET /orders/<id>`,
+`GET /me/orders`, `POST /orders/<id>/payment/confirm` and the other order
+routes, only once the order is paid (or a legacy pay-at-pickup order). An
+unpaid, expired or refunded order gets `pickup: null`, and so does a paid order
+from a shop that has not filled the address in.
+
+`POST /applications` takes both (optional there so older clients still work;
+the web form requires the address). `PUT /sellers/<id>/pickup` (owner or
+admin) edits them, partial like the storefront route; `null`/`""` clears one.
+Existing shops start with both empty, and the seller dashboard prompts them.
+
 Hooks for guided self-serve onboarding (later PR): a shop's `slug` and
 `connect.status` are everything a signup funnel needs to show "your link" and
 "finish payouts"; approval is still the admin step that makes both live.
+
+## Messaging
+
+`messaging.py` (a Flask blueprint) is the signed-in inbox. Each login acts as
+one *party*: a buyer as itself, a seller login as its shop (so every login of a
+shop shares one inbox), and an admin as "support" (every admin sees and answers
+every support thread; replies show as "Candy Lady support").
+
+| Kind | Who can start it | Between |
+| --- | --- | --- |
+| `support` | anyone signed in; an admin by naming `seller_id` or `user_id` | that buyer or shop, and support |
+| `seller` | an approved shop | two different approved shops |
+| `order` | the order's buyer or its shop, once paid (`paid`, `pay_at_pickup`, `refunded`) | that buyer and that shop; one thread per order |
+
+Admins never read `seller` or `order` threads, except the messages around one
+that somebody reported. Someone who is not a party gets 404, not 403, so ids do
+not reveal which conversations exist.
+
+Abuse protection: every message is capped at `MESSAGE_MAX_LENGTH`, sending is
+rate limited per login (counted in the database, so it holds across gunicorn
+workers), either side of a `seller` or `order` thread can block the other
+(which stops both directions until unblocked), and any message can be reported
+to `GET /admin/message-reports`. Support can never be blocked.
+
+Email notices are off by default (see `MESSAGE_EMAIL_*` above). When on, the
+recipient gets one email per conversation until they read it, with a link and
+never the message text. `mailer.py` sends through Resend's HTTP API with the
+standard library, so there is no new dependency.
+
+The tables (`conversation`, `conversation_party`, `message`,
+`conversation_read`, `message_block`, `message_report`) are new, so
+`db.create_all()` creates them on the first boot of a deploy; nothing existing
+is altered.
+
+## Forgot password
+
+`POST /password-reset/request {"email"}` always answers `202` with the same
+body whether or not the address has an account. When it does, and reset
+emails are on, the account gets a link to
+`PUBLIC_SITE_URL/reset-password#token=...` (the Next.js page; the old static
+site has no such page, so keep `PASSWORD_RESET_EMAILS` off on an API whose
+`PUBLIC_SITE_URL` is still the old site). The token sits in the URL fragment,
+so it never reaches a server log. `POST /password-reset/confirm {"token",
+"password"}` sets the password if the token is known, unused and unexpired,
+and spends it and every other open link for that account. Only a SHA-256 of
+each token is stored (table `password_reset_token`, created by
+`db.create_all()`). Asking again retires the previous link.
+
+Off by default and fails safe: with any of `PASSWORD_RESET_EMAILS`,
+`RESEND_API_KEY` or `MESSAGE_EMAIL_FROM` missing, no token is created, nothing
+is sent, the API logs a warning, and the answer is still `202` with
+`"email_enabled": false` (the same for every address) so the page can point
+people to hello@ instead. `GET /config` reports `password_reset_enabled`.
+
+Existing sessions are not signed out by a reset: access tokens are stateless
+JWTs that live `JWT_ACCESS_TOKEN_HOURS` (12).
 
 ## Schema migrations
 
@@ -333,8 +434,15 @@ Signed in:
 - `GET /orders/<id>`
 - `POST /orders`, `POST /orders/<id>/checkout`, `POST /orders/<id>/payment/confirm`, `POST /orders/<id>/cancel` (buyer)
 - `GET /sellers/<id>/inventory`, `PUT /sellers/<id>/inventory/<candy_id>`, `GET /sellers/<id>/orders`, `PUT /orders/<id>/status` (that shop's seller, or admin)
-- `PUT /sellers/<id>/storefront` — slug, tagline, theme, logo (that shop's seller, or admin)
+- `PUT /sellers/<id>/storefront` — slug, shop title, tagline, theme, logo (that shop's seller, or admin)
+- `PUT /sellers/<id>/pickup` — private pickup address and note (that shop's seller, or admin)
 - `POST /sellers/<id>/stripe/connect`, `GET /sellers/<id>/stripe/status`, `POST /sellers/<id>/stripe/dashboard` — Connect onboarding, status refresh, Express dashboard link (that shop's seller, or admin)
+
+- `GET /messages/unread` — unread count for the nav
+- `GET /conversations?offset=`, `POST /conversations` — inbox 50 at a time (`next_offset` is null on the last page), and start one (`kind`: `support`, `seller` or `order`)
+- `GET /conversations/<id>`, `POST /conversations/<id>/messages`, `POST /conversations/<id>/read` (body `{"last_message_id": n}` stops the marker at the newest message on screen)
+- `POST /conversations/<id>/block`, `DELETE /conversations/<id>/block`
+- `POST /messages/<id>/report`
 
 Admin only:
 
@@ -343,6 +451,7 @@ Admin only:
 - `POST /candies`, `PUT /candies/<id>`, `DELETE /candies/<id>` (retires the item: `is_active=false` and every shop's stock zeroed; past orders keep naming it)
 - `GET /orders`, `GET /admin/revenue`
 - `POST /admin/orders/<id>/refund`
+- `GET /admin/message-reports`, `PUT /admin/message-reports/<id>`
 
 ## Tests
 

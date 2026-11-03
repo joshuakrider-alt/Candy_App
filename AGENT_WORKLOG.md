@@ -415,6 +415,322 @@ DNS change; the Vercel connect half waits for the second project.
   `README.md`, `robots.txt`, `sitemap.xml`. Internal docs are not published
   and were left alone. No Vercel or Render settings were changed.
 
+## 2026-10-20 — Next.js Day 1 finished: layout, sign-in, proxy, info pages (Claude Code)
+
+- Joshua's go (Oct 20): Days 1–5 of `docs/NEXTJS_MIGRATION_PLAN.md`, one PR
+  per day into `staging`, stop at cutover. PR #22 and the staging Render
+  branch are waiting on his decision and were not touched.
+- `web/` now has the brand tokens (nine colours, 18/24/32 px radii, shadow),
+  Baloo 2 and Nunito via `next/font`, the sticky header, footer and phone tab
+  bar, `lib/session.ts`, `/api/auth/login|signup|logout|session`, the
+  `/api/flask/[...path]` proxy, `middleware.ts`, `/login`, `/signup`,
+  `lib/types.ts` and the six information pages (contact email is hello@).
+- Added beyond the plan's code: `/api/auth/session` (answers "signed out"
+  without calling Flask when there is no cookie, so the header never wakes
+  Render), and the cookie is cleared with its full attributes, because
+  browsers ignore a `__Host-` cookie set without Secure and Path=/.
+- Codex plan question on CSP vs cached pages, default picked (Joshua can change it):
+  nonce policy only on `/account`, `/seller`, `/admin`, `/login`, `/signup`,
+  `/checkout`; cached public pages get a fixed policy with inline scripts
+  allowed. Lint bans `dangerouslySetInnerHTML`.
+- New `Web CI` workflow: lint, types, build, and Playwright tests against a
+  local Flask on SQLite seeded by `backend/seed.py` (36 tests, phone and
+  laptop). No Vercel or Render settings were changed.
+
+## 2026-10-20 — Next.js Day 2: home, shops, shop pages, cart (Claude Code)
+
+- `/`, `/shops` and `/s/[slug]` are server-rendered from `GET /shops` and
+  `GET /shops/<slug>` (`lib/flask.ts`) and cached: `/` refreshes every 60 s,
+  the others every 30 s. An unreachable API at build time builds the page
+  empty instead of failing the deploy; after that a failed refresh keeps the
+  last good copy.
+- Cart: `store/cart.ts` (one shop per cart, never above stock), the drawer,
+  `/cart` and the "Start a new cart?" dialog. Checkout itself is Day 3.
+- Codex plan questions, defaults picked (Joshua can change them): seller logos
+  on other hosts render unresized and any https image is allowed; the old
+  `candyLadyCart`/`candyLadySellerId` keys are imported on first load and then
+  kept in sync with the new cart for the rollback window (remove with the old
+  site), while `candyLadyToken`, `candyLadyUser` and `candyLadyApiBase` are
+  deleted.
+- Found, not fixed (Flask, out of scope): `category_for_name` puts "Chocolate
+  Bar" under drinks, because "chocolate" contains "cola".
+- Browser tests now 50 (phone and laptop). No Vercel or Render settings changed.
+
+## 2026-10-20 — Next.js Day 3: checkout, Stripe return, buyer account (Claude Code)
+
+- Pay button (`components/cart/checkout-button.tsx`) posts the cart to Flask's
+  `POST /orders` through the proxy and sends the buyer to Stripe. Signed-out
+  buyers go to `/login?next=` and come back to the same shop. Flask's refusals
+  (shop not set up for cards, cards off on this API, sold out, under $0.50)
+  show as plain sentences in the cart.
+- Stripe still returns to the old URLs Flask builds (`/buyer.html?order=` and
+  `/s/<slug>?order=`); `next.config.ts` redirects both to `/checkout/return`,
+  which confirms the payment, clears the cart when paid, offers "finish paying"
+  or "release my snacks" when cancelled, and hands Android app buyers back to
+  `candylady://checkout-return`.
+- `/account` (change password, delete account, sign out) and `/account/orders`
+  (last 25 orders with pickup codes).
+- Browser tests now 64. A real Stripe test-card payment on beta is left for
+  Joshua to try by hand. No Vercel or Render settings changed.
+
+## 2026-10-20 — Next.js Day 4: seller screens (Claude Code)
+
+- `/sell/apply` (application, then the new seller is signed in) and the seller
+  dashboard: `/seller` pickup queue (refreshes every 30 s), `/seller/inventory`
+  (stock toggles, own items in a dialog instead of `window.prompt`),
+  `/seller/storefront` (link, tagline, logo, colours, live preview),
+  `/seller/payouts` (Stripe Connect), `/seller/verify` (Stripe Identity) and
+  `/seller/photos` (canvas re-encode that drops GPS data, then a signed upload
+  straight to R2).
+- Stripe's `/seller.html?stripe=…` and `?identity=return` returns redirect to
+  the new pages with the query kept.
+- New optional env var on the web project: `UPLOAD_ORIGIN`, the origin of the
+  API's `STORAGE_ENDPOINT_URL`. It is added to connect-src; without it the
+  browser blocks photo uploads. Not set anywhere yet (needs Joshua).
+- PR #22 (stock reservations) is not folded in: it changes the API, and the
+  staging API deploys from `main`. Waiting on Joshua's answer.
+- Browser tests now 80. No Vercel or Render settings changed.
+
+## 2026-10-20 — Next.js Day 5: admin, search engines, old addresses (Claude Code)
+
+- Admin screens: `/admin` (approve or reject applications), `/admin/revenue`
+  (totals, latest 200 orders, refund with a confirm step), `/admin/catalog`
+  (category balance) and `/admin/photos` (photo review).
+- `app/sitemap.ts` lists every approved shop; `app/robots.ts` and a `noindex`
+  tag keep search engines out unless `NEXT_PUBLIC_SITE_URL` is the real
+  domain, so beta is never indexed. At cutover that variable must become
+  `https://neighborhoodcandylady.com`. A generated link-preview image.
+- Every old `.html` address redirects permanently (308) to its new page.
+- Lighthouse (mobile, local build with the production site URL): `/`,
+  `/shops` and a shop page score 93+ performance, 100 accessibility, best
+  practices and SEO.
+- Browser tests now 100. Not done here: the manual pass on iPhone Safari and
+  Android Chrome, and the Stripe test-mode flows (4, 6, 9) on beta.
+- No Vercel or Render settings changed. Cutover not started.
+
+## 2026-10-22 — Beta: approved shops show on /shops straight away (Claude Code)
+
+- Joshua approved Beta Test Snacks on beta and it was missing from `/shops`
+  while `/s/beta-test-snacks` loaded. Neon staging had it approved with a
+  slug, so Flask was right; `/shops` and `/` are cached for 30 to 60 seconds
+  and the first visit after a change gets the old copy (a cold Render API
+  can keep it longer).
+- New server action `web/app/actions/refresh-shops.ts` drops the cached `/`,
+  `/shops`, shop pages and sitemap after an admin approves or rejects a shop
+  and after a seller saves their shop page, items or stock.
+- The admin browser test now loads `/shops` before approving and expects the
+  shop right after; without the fix it fails the same way beta did.
+
+## 2026-10-03 — Seller stock edits during open checkouts
+
+- Seller stock saves set an absolute count with no row lock, so a save could
+  overwrite a reservation that was committing, and a shelf count typed while
+  a checkout held units was inflated when that checkout was abandoned
+  (10 on the shelf, 3 held, seller types 10, release makes it 13).
+- Both stock PUT routes now lock the shelf row (same lock as checkout and the
+  sweep). The seller dashboard sends `on_hand_count` (what is on the shelf);
+  the API subtracts units held by open checkouts. `inventory_count` alone keeps
+  its old meaning. Seller inventory responses add `reserved_count` and
+  `on_hand_count`.
+- A payment that lands after the sweep released its stock, when that stock has
+  since been sold, now records `order.stock_shortfall` (new column, boot
+  migration, default 0) and logs a warning. The seller order queue shows it.
+- Known limit: marking an item "out" while a checkout holds units still lets
+  those units come back if that checkout is abandoned.
+- Deploy order does not matter: the dashboard sends both fields.
+
+## 2026-10-22 — Stock reservations (#22) folded into staging (Claude Code)
+
+- Merged draft #22's branch into `staging` unchanged on the API side (row
+  lock on seller stock saves, `on_hand_count`, `reserved_count`,
+  `order.stock_shortfall` added by the boot migration).
+- Ported its dashboard half to the Next.js seller screens: the stock dialog
+  starts from the shelf count and sends `on_hand_count` (plus
+  `inventory_count` for an older API), rows show "N held in open
+  checkouts", and the pickup queue warns when a late payment left an order
+  short.
+- The staging API deploys from `staging`, so the new column lands on the
+  Neon staging branch only. Production gets it only when `staging` reaches
+  `main` at cutover.
+- API tests: 245 passed, 8 skipped (SQLite). Browser tests: 102 passed.
+- No Vercel or Render settings changed. Cutover not started.
+- Later the same day: brought `staging` (#35's /shops refresh) into the
+  branch, and the seller inventory read now takes the stock label from the
+  same statement as the count and held units, so a sale in between cannot
+  show "0 left" next to "In stock" (Codex finding).
+
+## 2026-10-22 — Connect accounts created through Accounts v2 (Claude Code)
+
+- Joshua turned on "Accounts v1 support" in the Stripe sandbox because the
+  v1 account create was refused. `backend/connect.py` now creates accounts
+  with `POST /v2/core/accounts` (Express dashboard, merchant `card_payments`
+  and recipient `stripe_transfers` requested, fees and losses on the
+  platform), retrieves them with v2 and opens onboarding with v2 Account
+  Links. The Express login link stays on v1 (v2 has none); destination
+  charges and refunds are unchanged.
+- `connect.readiness` reads both shapes: the v1 `account.updated` webhook
+  still sends `charges_enabled` / `details_submitted`.
+- Checked against the request shapes in stripe-python 15.6.1 (API version
+  2026-08-26.dahlia); Stripe's docs site is blocked from this container.
+  Not yet tried against Stripe itself.
+- API tests: 239 passed, 7 skipped. No Stripe, Vercel or Render settings
+  changed. Cutover not started.
+
+## 2026-10-24 — Merged main into staging before cutover (Claude Code)
+
+- Joshua asked for `main` to be merged into `staging` so the later
+  staging-to-main cutover PR is clean. `main` had one change staging lacked:
+  PR #27 (public contact email switched to hello@ on the 12 static pages).
+- The only conflict was this file. Both sides were kept in full; main's
+  2026-10-18 entry sits before staging's 2026-10-20 entries so the log stays
+  in date order. The 12 HTML files merged without conflict.
+- No Vercel, Render, Stripe or DNS settings changed. Cutover not started.
+
+## 2026-10-24 — Footer with a "Get it on Google Play" badge (Claude Code)
+
+- The web/ footer now carries Google's "Get it on Google Play" badge,
+  linking to https://play.google.com/store/apps/details?id=com.neighborhoodcandylady.app,
+  next to the existing footer links, plus the trademark line Google's badge
+  rules ask for ("Google Play and the Google Play logo are trademarks of
+  Google LLC."). Badge is 48px tall with at least a quarter of its height
+  clear around it, artwork unchanged.
+- The footer was only on the store pages. It is now also on /login,
+  /signup and the bare 404 page, so every web/ page has it.
+- Badge served from web/public/badges/google-play-en.svg (no request to
+  Google). play.google.com and Google's partner site are blocked from this
+  container, so the file came from the npm package @mynameiskazim/storebadge
+  (googleplay-en.svg), which is Google's current badge export. Swap in the
+  file from Google's badge page if wanted; same name, nothing else changes.
+- Browser tests: 112 passed (10 new). Lint, typecheck and build clean.
+- No Vercel, Render, DNS or production settings changed. Cutover not started.
+
+## 2026-10-24 — In-site messaging inbox (Claude Code)
+
+- Ask 3 of Joshua's pre-cutover list, as its own PR into `staging`.
+- API: `backend/messaging.py` blueprint plus six new tables (created by
+  `db.create_all()` on boot, nothing existing altered). Support threads
+  (buyers and shops to admin, any admin answers as "Candy Lady support"),
+  shop-to-shop threads between approved shops, and one thread per paid order
+  between buyer and shop. Unread counts, read markers, block/unblock,
+  reports with an admin review list. Per-login rate limits and a 2000
+  character cap. Account deletion keeps the other side's history but
+  removes the link to the person.
+- Site: `/account/messages` inbox, thread and new-message pages,
+  `/admin/messages` support inbox with reported messages, an unread badge in
+  the header, account menu and dashboard nav, and "Message the shop" /
+  "Message the buyer" links on order cards and the pickup queue.
+- Email notices: the API had no email setup, so `backend/mailer.py`
+  (Resend HTTP API, stdlib only) is behind `MESSAGE_EMAIL_NOTIFICATIONS`,
+  off by default. Turning it on needs a Resend account, the domain verified
+  there (DNS records), and `RESEND_API_KEY` / `MESSAGE_EMAIL_FROM` /
+  optionally `SUPPORT_NOTIFY_EMAIL` on Render. None of that was done here.
+- Staging only: the new tables appear on the staging Neon branch when the
+  staging API next deploys from `staging`. No Vercel, Render, Neon, DNS or
+  production settings changed.
+- Codex review fixes in the same PR: messaging caches keyed by the signed-in
+  login, rate-limit checks serialized per login (row lock), read marker stops
+  at the newest message the browser showed (and is updated under a row
+  lock), inbox pages 50 at a time with previews fetched in one query.
+- API tests: 279 passed, 8 skipped (SQLite). Browser tests: 104 passed.
+
+## 2026-10-24 — Private seller pickup address (Claude Code)
+
+- Joshua's ask 1 before cutover: buyers only saw the neighborhood and pickup
+  hours after paying. Sellers now have a private `pickup_address` and
+  `pickup_note` (new nullable columns, added by the boot migration; existing
+  shops start empty, nothing guessed).
+- Who sees them: the shop's owner and admins, and a buyer only on an order
+  that is paid (same gate as the pickup code: `Order.pickup_dict`). Unpaid,
+  expired and refunded orders get `pickup: null`. Public routes (`/sellers`,
+  `/shops`, `/shops/<slug>`, storefront) are unchanged and tested not to
+  contain them.
+- Web: asked for in the shop application (address required in the form,
+  optional in the API so older clients still apply), editable on a new
+  seller page `/seller/pickup`, a dashboard prompt for shops without one,
+  shown on the checkout return page, the order card and a new receipt page
+  `/account/orders/<id>`. Admin applications list shows it.
+- Demo seed: Ms. Kiki's gets a fake address; Northview stays empty (a shop
+  from before this change).
+- Codex finding, fixed: the browser's query cache survived sign-out, so a
+  second account in the same tab could be shown the first one's cached
+  receipt (address included). Every sign-in, sign-up and sign-out now drops
+  all cached data except the session (`useRefreshSession`), with a browser
+  test that switches accounts without reloading.
+- API tests: 274 passed, 8 skipped (SQLite). Browser tests: 110 passed.
+- No Vercel, Render, DNS or production changes. Cutover not started.
+
+## 2026-10-24 — Shop title picker (Claude Code)
+
+- Joshua asked for each shop to choose how it is labeled, so the site is
+  inclusive: Candy Lady, Candy Woman, Candy Guy, Candy Man, Candy Shop, or a
+  custom title. No one is asked for their gender; it is only a title.
+- New column `seller.shop_title VARCHAR(40) NOT NULL DEFAULT 'Candy Lady'`,
+  added by the boot migration in `backend/migrations.py`. Existing shops read
+  "Candy Lady" with no backfill; new shops get "Candy Shop" from the app code.
+  The constant default means the previous release can keep inserting shops
+  after a rollback. It is applied only where this code boots, which is the
+  staging API (Render deploys `staging`) and its staging Neon branch;
+  production (`main`) is untouched. No SQL was run by hand.
+- Custom titles: 2-24 characters (stored NFC), letters in any script with
+  their combining marks (Codex finding on 10-26: Hindi titles were refused),
+  numbers, spaces and `' & . -`, a basic
+  whole-word profanity filter (plus spelled-out runs like "f.u.c.k"), and no
+  staff-sounding words (official, admin, support...). Rules in
+  `backend/storefront.py`; length and character checks are repeated in
+  `web/lib/shop-title.ts` for instant form errors.
+- API: `shop_title` in `Seller.to_dict` (so storefront, `/sellers`, `/me`,
+  orders) and in `/shops`; accepted by `POST /applications` and
+  `PUT /sellers/<id>/storefront`.
+- Web: picker on `/sell/apply` (Candy Shop preselected) and
+  `/seller/storefront`; title shown on `/s/<slug>`, `/shops` cards, order
+  cards, the checkout return page, the seller dashboard header and admin
+  applications. Site brand stays Neighborhood Candy Lady.
+- Messages: PR #40 (inbox) is not in staging yet, so its names are not
+  touched here; once it merges, a small follow-up adds the title there.
+- Tests: API 282 passed, 9 skipped (SQLite); Postgres migration and title
+  tests pass on a local Postgres; web typecheck, lint, build pass; Playwright
+  104 of 104 pass. No Vercel, Render, Stripe or DNS settings changed.
+  Cutover not started.
+
+## 2026-10-28 — Beta fixes before cutover: loading state, category, password reset (Claude Code)
+
+Joshua found three things while testing beta; one PR into `staging`.
+
+1. **"Every shop is restocking" / 0 shops on first load.** Cause: the home
+   page and /shops are cached pages. When the staging API is asleep while
+   Vercel builds them, `getShops()` turned the failed read into `[]`, so the
+   cached copy said there were no shops until it was rebuilt in the
+   background. Now `getShops()` returns `null` for "not known", and those
+   pages show "Loading shops..." with skeleton cards and fetch the list in the
+   browser (`web/components/shop/use-shops.ts`, about 75 s of retries for a
+   Render cold start, then "Try again"). "Restocking", "0 shops" and
+   "No shops" appear only after a list has actually arrived. New cold-start
+   browser suite (`npm run test:e2e:cold`, also in Web CI) builds the site
+   with the API unreachable: 10 of 10 fail on the old code, 10 of 10 pass.
+2. **Chocolate Bar under Drinks.** Code bug, not data: `category_for_name`
+   matched substrings, and "choCOLAte" contains the drink word "cola" (it
+   would also have put "HomemADE Fudge" under drinks). It now matches whole
+   words, with candy words winning ("Cola Gummies" stays candy). Category is
+   computed from the name on every read and never stored, so the fix applies
+   to staging and production rows with no data migration. Checked read-only
+   on the staging Neon branch (a copy of production): 4 catalog items, only
+   Chocolate Bar changes (drinks to candy).
+3. **Forgot password.** Link on /login, `/forgot-password`, and
+   `/reset-password#token=...`. API: `backend/password_reset.py`, new table
+   `password_reset_token` (created by `db.create_all()`; SHA-256 of the token
+   only, 60-minute expiry, single use, newest link only, 3 links an hour per
+   account). Same 202 answer whether or not the email has an account. Off by
+   default; to send reset emails set on the API: `PASSWORD_RESET_EMAILS=true`,
+   `RESEND_API_KEY`, `MESSAGE_EMAIL_FROM` (domain verified in Resend), and
+   `PUBLIC_SITE_URL` must be the Next.js site. Without them nothing is created
+   or sent and the page points people to hello@.
+- Tests: API 371 passed, 9 skipped (SQLite); the new reset, category,
+  access-control and account-deletion tests also pass on Postgres 16. Web
+  typecheck, lint and build pass; Playwright 134 of 134 and cold-start 10 of
+  10 pass.
+- No Vercel, Render, DNS or production changes. No data changed. Cutover not
+  started.
+
 ## Logging rule
 
 Every agent (or Claude/Codex session) that merges code, changes env vars, or

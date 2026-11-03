@@ -12,6 +12,8 @@ from werkzeug.exceptions import HTTPException
 import accounts
 import connect
 import identity
+import messaging
+import password_reset
 import payments
 import storage
 import storefront
@@ -32,6 +34,8 @@ from models import (
     INVENTORY_STATUSES,
     ORDER_STATUSES,
     PHOTO_STATUSES,
+    PICKUP_ADDRESS_MAX_LENGTH,
+    PICKUP_NOTE_MAX_LENGTH,
     Candy,
     Order,
     OrderItem,
@@ -82,6 +86,26 @@ def parse_int(value, field, minimum=0):
     if number < minimum:
         abort(400, description=problem)
     return number
+
+
+def parse_pickup_text(value, field, max_length):
+    """A pickup address or note from JSON: trimmed text, or None when blank.
+
+    Line breaks are kept (an address is often two lines) but blank lines and
+    stray spaces are dropped, and other control characters are refused so the
+    text prints cleanly on a receipt.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        abort(400, description=f"{field} must be text")
+    lines = [" ".join(line.split()) for line in value.replace("\r\n", "\n").split("\n")]
+    text = "\n".join(line for line in lines if line)
+    if any(ord(char) < 32 and char != "\n" for char in text):
+        abort(400, description=f"{field} contains characters that are not allowed")
+    if len(text) > max_length:
+        abort(400, description=f"{field} must be {max_length} characters or fewer")
+    return text or None
 
 
 def stock_status_for(count):
@@ -201,6 +225,11 @@ def create_app(config_overrides=None):
     # has passed Stripe Identity before an admin can approve them.
     app.config["REQUIRE_SELLER_IDENTITY"] = _env_bool("REQUIRE_SELLER_IDENTITY", False)
 
+    # In-site messaging limits and the optional email notice (messaging.py).
+    messaging.configure(app, _env_int, _env_bool, os.environ)
+    # "Forgot password?" links, off until reset emails are switched on.
+    password_reset.configure(app, _env_int, _env_bool)
+
     app.config["RUN_MIGRATIONS_ON_BOOT"] = True
 
     if config_overrides:
@@ -252,6 +281,8 @@ def create_app(config_overrides=None):
 
     register_error_handlers(app, jwt)
     register_routes(app)
+    app.register_blueprint(messaging.bp)
+    app.register_blueprint(password_reset.bp)
     return app
 
 
@@ -344,12 +375,28 @@ def register_routes(app):
         order.inventory_released_at = utcnow()
 
     def reserve_order_inventory(order):
+        """Take a paid order's units back off the shelf after a release.
+
+        The count cannot go below zero, so units that were sold to someone
+        else in the meantime are recorded on the order as a shortfall instead
+        of vanishing: the seller has to fill or refund them.
+        """
         rows = locked_inventory_for(order)
+        shortfall = 0
         for item in order.items:
             inventory = rows.get(item.candy_id)
+            on_shelf = (inventory.inventory_count or 0) if inventory else 0
+            shortfall += max(0, item.quantity - on_shelf)
             if inventory:
                 inventory.apply_count_change(-item.quantity)
         order.inventory_released_at = None
+        order.stock_shortfall = shortfall
+        if shortfall:
+            logger.warning(
+                "order %s was paid after its stock was released and is %s unit(s) short",
+                order.id,
+                shortfall,
+            )
 
     def pending_order_ttl_minutes():
         """How long a checkout may hold stock before the sweep releases it.
@@ -391,6 +438,128 @@ def register_routes(app):
             release_order_inventory(order)
             order.payment_status = "expired"
         db.session.commit()
+
+    def reserved_counts(seller_id, candy_ids):
+        """Units of each item held by this shop's open checkouts.
+
+        Those units are already taken out of inventory_count but are still on
+        the seller's shelf, and they go back into inventory_count if the buyer
+        abandons the checkout.
+        """
+        candy_ids = list(candy_ids)
+        if not candy_ids:
+            return {}
+        rows = (
+            db.session.query(OrderItem.candy_id, func.sum(OrderItem.quantity))
+            .join(Order, OrderItem.order_id == Order.id)
+            .filter(
+                Order.seller_id == seller_id,
+                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
+                Order.inventory_released_at.is_(None),
+                OrderItem.candy_id.in_(candy_ids),
+            )
+            .group_by(OrderItem.candy_id)
+            .all()
+        )
+        return {candy_id: int(total or 0) for candy_id, total in rows}
+
+    def seller_inventory_payload(seller_id, rows):
+        """Inventory rows for the seller's own dashboard.
+
+        Adds reserved_count (held by open checkouts) and on_hand_count (what
+        should be on the shelf: for sale plus held), so a seller who counts the
+        shelf can type that number back as on_hand_count.
+        """
+        # The count, its stock label and the held units are read in one
+        # statement, so a checkout committing in between cannot make
+        # on_hand_count add a reservation to a count it was not yet taken from
+        # (or the reverse), nor pair a fresh count with a stale status.
+        held = (
+            db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
+            .join(Order, OrderItem.order_id == Order.id)
+            .filter(
+                Order.seller_id == seller_id,
+                Order.payment_status.in_(OPEN_PAYMENT_STATUSES),
+                Order.inventory_released_at.is_(None),
+                OrderItem.candy_id == SellerInventory.candy_id,
+            )
+            .correlate(SellerInventory)
+            .scalar_subquery()
+        )
+        candy_ids = [row.candy_id for row in rows]
+        snapshot = {
+            candy_id: (count or 0, status, int(reserved or 0))
+            for candy_id, count, status, reserved in db.session.query(
+                SellerInventory.candy_id, SellerInventory.inventory_count, SellerInventory.status, held
+            ).filter(
+                SellerInventory.seller_id == seller_id,
+                SellerInventory.candy_id.in_(candy_ids),
+            )
+        } if candy_ids else {}
+        payload = []
+        for row in rows:
+            data = row.to_dict()
+            count, status, reserved = snapshot.get(row.candy_id, (row.inventory_count or 0, row.status, 0))
+            data["inventory_count"] = count
+            data["status"] = status
+            data["reserved_count"] = reserved
+            data["on_hand_count"] = count + reserved
+            payload.append(data)
+        return payload
+
+    def lock_seller_inventory_row(seller_id, candy_id):
+        """One shelf row under a write lock, or None.
+
+        create_order and the sweep change the count under the same lock, so a
+        seller's edit can neither overwrite a reservation that is committing
+        nor read the held units while a release is putting them back.
+        """
+        return seller_inventory_lock_query(seller_id, [candy_id]).first()
+
+    def requested_available_count(data, values, seller_id, candy_id, inventory):
+        """The sellable count a seller's edit asks for, or None for no change.
+
+        on_hand_count is the number on the shelf, so the units held by open
+        checkouts are taken off it here; otherwise they would be counted twice
+        once the checkout is released. inventory_count is still accepted and
+        means the sellable count itself, as before; when both are sent,
+        on_hand_count wins, so a dashboard can send both and work against an
+        API from before on_hand_count. Call with the row locked.
+
+        A dashboard that sends reserved_count and seen_inventory_count (the
+        held and for-sale counts it showed) gets a 409 when either has
+        changed, for example a held checkout was paid while the dialog was
+        open, or paid and replaced by a new one of the same size, so a stale
+        shelf count is never saved. A
+        shelf count below the held units is refused rather than clamped:
+        clamping would forget the missing units, and a later release would
+        put them back on sale.
+        """
+        if "on_hand_count" not in data:
+            return values.get("inventory_count")
+        on_hand = parse_int(data["on_hand_count"], "on_hand_count")
+        held = reserved_counts(seller_id, [candy_id]).get(candy_id, 0)
+        for_sale = (inventory.inventory_count or 0) if inventory is not None else 0
+        if ("reserved_count" in data and parse_int(data["reserved_count"], "reserved_count") != held) or (
+            "seen_inventory_count" in data
+            and parse_int(data["seen_inventory_count"], "seen_inventory_count") != for_sale
+        ):
+            abort(
+                409,
+                description=(
+                    f"Your stock changed while you were editing: {held} now held in "
+                    "open checkouts. Check the count and save again."
+                ),
+            )
+        if on_hand < held:
+            abort(
+                400,
+                description=(
+                    f"{held} are held in open checkouts, so the shelf count must be "
+                    f"at least {held}."
+                ),
+            )
+        return on_hand - held
 
     def unique_pickup_code():
         for _ in range(12):
@@ -486,6 +655,9 @@ def register_routes(app):
     def order_response(order, checkout_url=None):
         payload = order.to_dict()
         payload["seller"] = order.seller.to_dict() if order.seller else None
+        # Every caller has already passed assert_order_access (or is an admin
+        # list), and pickup_dict itself stays None until the order is paid.
+        payload["pickup"] = order.pickup_dict()
         if checkout_url:
             payload["checkout_url"] = checkout_url
         return payload
@@ -557,6 +729,7 @@ def register_routes(app):
         config["max_upload_bytes"] = storage.max_upload_bytes(app.config)
         config["accepted_image_types"] = sorted(storage.ALLOWED_CONTENT_TYPES)
         config["identity_enabled"] = identity.identity_enabled()
+        config["password_reset_enabled"] = password_reset.is_enabled(app.config)
         return jsonify(config)
 
     # ------------------------------------------------------------------
@@ -804,13 +977,30 @@ def register_routes(app):
         password = validate_password(data.get("password"))
         if User.query.filter_by(email=email).first():
             abort(409, description="an account with that email already exists")
+        # Optional: onboarding preselects "Candy Shop", and an older client
+        # that never sends the field gets the same.
+        shop_title = storefront.DEFAULT_SHOP_TITLE
+        if data.get("shop_title") is not None:
+            try:
+                shop_title = storefront.normalize_shop_title(data.get("shop_title"))
+            except ValueError as error:
+                abort(400, description=f"shop_title: {error}")
 
         seller = Seller(
             shop_name=data["shop_name"].strip(),
+            shop_title=shop_title,
             contact_name=data["contact_name"].strip(),
             contact_email=email,
             neighborhood=data["neighborhood"].strip(),
             pickup_window=data["pickup_window"].strip(),
+            # Optional here so an older client that does not send them can
+            # still apply; the dashboard keeps asking until they are filled.
+            pickup_address=parse_pickup_text(
+                data.get("pickup_address"), "pickup_address", PICKUP_ADDRESS_MAX_LENGTH
+            ),
+            pickup_note=parse_pickup_text(
+                data.get("pickup_note"), "pickup_note", PICKUP_NOTE_MAX_LENGTH
+            ),
             status="pending",
         )
         db.session.add(seller)
@@ -881,6 +1071,29 @@ def register_routes(app):
         db.session.commit()
         if status == "approved":
             ensure_seller_inventory_rows(seller.id)
+        return jsonify(seller.to_dict(include_contact_email=True))
+
+    @app.route("/sellers/<int:seller_id>/pickup", methods=["PUT"])
+    @require_roles("seller", "admin")
+    def update_pickup_details(seller_id):
+        """Set the shop's private pickup address and door note.
+
+        Partial update, like the storefront settings: only fields present in
+        the body change, and null or "" clears one. Kept off the storefront
+        route on purpose, because everything that route saves is public.
+        """
+        assert_seller_access(current_user(), seller_id)
+        seller = Seller.query.get_or_404(seller_id)
+        data = request.get_json() or {}
+        if "pickup_address" in data:
+            seller.pickup_address = parse_pickup_text(
+                data.get("pickup_address"), "pickup_address", PICKUP_ADDRESS_MAX_LENGTH
+            )
+        if "pickup_note" in data:
+            seller.pickup_note = parse_pickup_text(
+                data.get("pickup_note"), "pickup_note", PICKUP_NOTE_MAX_LENGTH
+            )
+        db.session.commit()
         return jsonify(seller.to_dict(include_contact_email=True))
 
     # ------------------------------------------------------------------
@@ -1324,6 +1537,7 @@ def register_routes(app):
                     "slug": seller.slug,
                     "storefront_path": seller.storefront_path,
                     "shop_name": seller.shop_name,
+                    "shop_title": seller.shop_title,
                     "tagline": seller.tagline,
                     "neighborhood": seller.neighborhood,
                     "pickup_window": seller.pickup_window,
@@ -1388,7 +1602,7 @@ def register_routes(app):
     @app.route("/sellers/<int:seller_id>/storefront", methods=["PUT"])
     @require_roles("seller", "admin")
     def update_storefront_settings(seller_id):
-        """Edit the shop's public identity: slug, tagline, logo, theme.
+        """Edit the shop's public identity: slug, title, tagline, logo, theme.
 
         Partial update: only fields present in the body change, and sending
         null or "" clears an optional field. The slug cannot be cleared once
@@ -1406,6 +1620,12 @@ def register_routes(app):
             if slug_taken(slug, seller.id):
                 abort(409, description="that address is already taken")
             seller.slug = slug
+
+        if "shop_title" in data:
+            try:
+                seller.shop_title = storefront.normalize_shop_title(data.get("shop_title"))
+            except ValueError as error:
+                abort(400, description=f"shop_title: {error}")
 
         if "tagline" in data:
             tagline = str(data.get("tagline") or "").strip()
@@ -1501,7 +1721,7 @@ def register_routes(app):
         )
         db.session.add(inventory)
         db.session.commit()
-        return jsonify(inventory.to_dict()), 201
+        return jsonify(seller_inventory_payload(seller_id, [inventory])[0]), 201
 
     @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["PUT"])
     @require_roles("seller", "admin")
@@ -1511,15 +1731,17 @@ def register_routes(app):
         candy = owned_item_or_404(seller_id, candy_id)
         if not candy.is_active:
             abort(400, description="removed items cannot be edited")
-        values = seller_item_values(request.get_json() or {}, partial=True)
-        inventory = SellerInventory.query.filter_by(
-            seller_id=seller_id, candy_id=candy_id
-        ).first_or_404()
+        data = request.get_json() or {}
+        values = seller_item_values(data, partial=True)
+        inventory = lock_seller_inventory_row(seller_id, candy_id)
+        if inventory is None:
+            abort(404)
         for field in ("name", "description", "price_cents"):
             if field in values:
                 setattr(candy, field, values[field])
-        if "inventory_count" in values:
-            inventory.inventory_count = values["inventory_count"]
+        count = requested_available_count(data, values, seller_id, candy_id, inventory)
+        if count is not None:
+            inventory.inventory_count = count
             if inventory.inventory_count == 0:
                 inventory.status = "out-of-stock"
             elif "status" not in values:
@@ -1529,7 +1751,7 @@ def register_routes(app):
             if inventory.status == "out-of-stock":
                 inventory.inventory_count = 0
         db.session.commit()
-        return jsonify(inventory.to_dict())
+        return jsonify(seller_inventory_payload(seller_id, [inventory])[0])
 
     @app.route("/sellers/<int:seller_id>/items/<int:candy_id>", methods=["DELETE"])
     @require_roles("seller", "admin")
@@ -1560,7 +1782,7 @@ def register_routes(app):
             .order_by(Candy.name)
             .all()
         )
-        return jsonify([item.to_dict() for item in inventory])
+        return jsonify(seller_inventory_payload(seller_id, inventory))
 
     @app.route("/sellers/<int:seller_id>/inventory/<int:candy_id>", methods=["PUT"])
     @require_roles("seller", "admin")
@@ -1571,17 +1793,16 @@ def register_routes(app):
         if not candy.is_active or candy.owner_seller_id not in (None, seller_id):
             abort(403, description="this item is not available to this shop")
         data = request.get_json() or {}
-        inventory = SellerInventory.query.filter_by(
-            seller_id=seller_id, candy_id=candy_id
-        ).first()
+        inventory = lock_seller_inventory_row(seller_id, candy_id)
 
         if inventory is None:
             inventory = SellerInventory(seller_id=seller_id, candy_id=candy_id)
             db.session.add(inventory)
 
-        count = None
+        values = {}
         if "inventory_count" in data:
-            count = parse_int(data["inventory_count"], "inventory_count")
+            values["inventory_count"] = parse_int(data["inventory_count"], "inventory_count")
+        count = requested_available_count(data, values, seller_id, candy_id, inventory)
         status = None
         if "status" in data:
             status = data["status"]
@@ -1604,7 +1825,7 @@ def register_routes(app):
             inventory.status = "out-of-stock"
 
         db.session.commit()
-        return jsonify(inventory.to_dict())
+        return jsonify(seller_inventory_payload(seller_id, [inventory])[0])
 
     @app.route("/sellers/<int:seller_id>/orders", methods=["GET"])
     @require_roles("seller", "admin")
